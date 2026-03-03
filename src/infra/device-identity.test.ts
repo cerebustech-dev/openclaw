@@ -57,5 +57,34 @@ describe("device identity crypto helpers", () => {
       expect(verifyDeviceSignature("%%%invalid%%%", payload, signature)).toBe(false);
       expect(verifyDeviceSignature(identity.publicKeyPem, payload, "%%%invalid%%%")).toBe(false);
     });
-  });
+
+import fs from "node:fs";
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("node:fs", async () => {
+  const actual = await vi.importActual<typeof import("node:fs")>("node:fs");
+  return {
+    ...actual,
+    default: {
+      ...actual,
+      existsSync: vi.fn(() => false),
+      mkdirSync: vi.fn(),
+      writeFileSync: vi.fn(),
+      chmodSync: vi.fn(),
+    },
+  };
+});
+
+vi.mock("../config/paths.js", () => ({
+  resolveStateDir: () => "/tmp/test-openclaw-state",
+}));
+
+describe("device identity directory permissions", () => {
+  it("creates identity directory with mode 0o700", async () => {
+    const { loadOrCreateDeviceIdentity } = await import("./device-identity.js");
+    loadOrCreateDeviceIdentity("/tmp/test-openclaw-state/identity/device.json");
+    expect(fs.mkdirSync).toHaveBeenCalledWith(
+      "/tmp/test-openclaw-state/identity",
+      expect.objectContaining({ recursive: true, mode: 0o700 }),
+    );  });
 });

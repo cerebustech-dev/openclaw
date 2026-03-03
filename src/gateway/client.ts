@@ -226,7 +226,9 @@ export class GatewayClient {
       maxPayload: 25 * 1024 * 1024,
     };
     if (url.startsWith("wss://") && this.opts.tlsFingerprint) {
-      wsOptions.rejectUnauthorized = false;
+      // Keep standard TLS chain validation (rejectUnauthorized defaults to true).
+      // The checkServerIdentity callback adds fingerprint pinning ON TOP of chain
+      // validation, so both the CA chain AND the fingerprint must pass.
       wsOptions.checkServerIdentity = ((_host: string, cert: CertMeta) => {
         const fingerprintValue =
           typeof cert === "object" && cert && "fingerprint256" in cert

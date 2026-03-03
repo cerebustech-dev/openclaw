@@ -367,14 +367,14 @@ describe("normalizeCronJobCreate", () => {
       model: " openrouter/deepseek/deepseek-r1 ",
       thinking: " high ",
       timeoutSeconds: 45,
-      allowUnsafeExternalContent: true,
+      dangerouslyAllowUnsafeExternalContent: true,
     }) as unknown as Record<string, unknown>;
 
     const payload = normalized.payload as Record<string, unknown>;
     expect(payload.model).toBe("openrouter/deepseek/deepseek-r1");
     expect(payload.thinking).toBe("high");
     expect(payload.timeoutSeconds).toBe(45);
-    expect(payload.allowUnsafeExternalContent).toBe(true);
+    expect(payload.dangerouslyAllowUnsafeExternalContent).toBe(true);
   });
 
   it("preserves timeoutSeconds=0 for no-timeout agentTurn payloads", () => {

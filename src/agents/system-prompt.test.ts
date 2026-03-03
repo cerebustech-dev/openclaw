@@ -170,6 +170,13 @@ describe("buildAgentSystemPrompt", () => {
     expect(prompt).not.toContain("Read HEARTBEAT.md");
   });
 
+  it("includes anti-extraction instruction to not reveal system prompt", () => {
+    const prompt = buildAgentSystemPrompt({
+      workspaceDir: "/tmp/openclaw",
+    });
+    expect(prompt).toMatch(/(do not|never).*(reveal|repeat|share).*system prompt/i);
+  });
+
   it("includes safety guardrails in full prompts", () => {
     const prompt = buildAgentSystemPrompt({
       workspaceDir: "/tmp/openclaw",
@@ -553,6 +560,49 @@ describe("buildAgentSystemPrompt", () => {
     });
 
     expect(prompt).not.toContain("# Project Context");
+  });
+
+it("wraps context file content with EXTERNAL_UNTRUSTED_CONTENT markers", () => {
+    const prompt = buildAgentSystemPrompt({
+      workspaceDir: "/tmp/openclaw",
+      contextFiles: [
+        { path: "AGENTS.md", content: "Alpha content here" },
+        { path: "IDENTITY.md", content: "Bravo content here" },
+      ],
+    });
+
+    // Each context file content should be wrapped with security boundary markers
+    expect(prompt).toMatch(/<<<EXTERNAL_UNTRUSTED_CONTENT id="[a-f0-9]{16}">>>/);
+    expect(prompt).toMatch(/<<<END_EXTERNAL_UNTRUSTED_CONTENT id="[a-f0-9]{16}">>>/);
+
+    // The original content should still be present inside the markers
+    expect(prompt).toContain("Alpha content here");
+    expect(prompt).toContain("Bravo content here");
+
+    // Should have two sets of markers (one per file)
+    const startMarkers = prompt.match(/<<<EXTERNAL_UNTRUSTED_CONTENT id="[a-f0-9]{16}">>>/g);
+    const endMarkers = prompt.match(/<<<END_EXTERNAL_UNTRUSTED_CONTENT id="[a-f0-9]{16}">>>/g);
+    expect(startMarkers).toHaveLength(2);
+    expect(endMarkers).toHaveLength(2);
+
+    // File path headers should still be present outside the markers
+    expect(prompt).toContain("## AGENTS.md");
+    expect(prompt).toContain("## IDENTITY.md");
+  });
+
+  it("wraps context files with reasonable overhead (< 500 chars per file)", () => {
+    const content = "Test content";
+    const prompt = buildAgentSystemPrompt({
+      workspaceDir: "/tmp/openclaw",
+      contextFiles: [{ path: "TEST.md", content }],
+    });
+
+    // Extract the section between the file header and the next section
+    const fileSection = prompt.split("## TEST.md")[1]?.split("\n## ")[0] ?? "";
+    // The overhead is the wrapped section minus the original content
+    const overhead = fileSection.length - content.length;
+    expect(overhead).toBeLessThan(500);
+    expect(overhead).toBeGreaterThan(0);
   });
 
   it("summarizes the message tool when available", () => {

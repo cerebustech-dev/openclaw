@@ -36,6 +36,18 @@ describe("buildControlUiCspHeader", () => {
     const csp = buildControlUiCspHeader({ inlineScriptHashes: [] });
     expect(csp).toMatch(/script-src 'self'(?:;|$)/);
   });
+  });
+
+  it("includes connect-src 'self' without ws:/wss: scheme wildcards", () => {
+    const csp = buildControlUiCspHeader();
+    expect(csp).toContain("connect-src 'self'");
+    const connectSrc = csp
+      .split(";")
+      .map((d) => d.trim())
+      .find((d) => d.startsWith("connect-src"));
+    expect(connectSrc).toBeDefined();
+    expect(connectSrc).not.toContain("ws:");
+    expect(connectSrc).not.toContain("wss:");
 });
 
 describe("computeInlineScriptHashes", () => {
@@ -85,6 +97,5 @@ describe("computeInlineScriptHashes", () => {
   });
 
   it("skips empty inline scripts", () => {
-    expect(computeInlineScriptHashes("<script></script>")).toEqual([]);
-  });
+    expect(computeInlineScriptHashes("<script></script>")).toEqual([]);  });
 });

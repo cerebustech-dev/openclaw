@@ -91,7 +91,7 @@ type CronAgentTurnPayloadFields = {
   fallbacks?: string[];
   thinking?: string;
   timeoutSeconds?: number;
-  allowUnsafeExternalContent?: boolean;
+  dangerouslyAllowUnsafeExternalContent?: boolean;
   /** Immutable external hook provenance for async dispatch. */
   externalContentSource?: HookExternalContentSource;
   /** If true, run with lightweight bootstrap context. */

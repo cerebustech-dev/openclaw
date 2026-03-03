@@ -127,6 +127,17 @@ LABEL org.opencontainers.image.source="https://github.com/openclaw/openclaw" \
   org.opencontainers.image.title="OpenClaw" \
   org.opencontainers.image.description="OpenClaw gateway and CLI runtime container image"
 
+# Install Bun (required for build scripts).
+# Pin to a specific version to avoid supply-chain risk from curl|bash.
+ARG BUN_VERSION=1.3.10
+RUN curl -fsSL -o /tmp/bun-install.sh "https://bun.sh/install" \
+ && BUN_INSTALL=/root/.bun bash /tmp/bun-install.sh "bun-v${BUN_VERSION}" \
+ && rm -f /tmp/bun-install.sh \
+ && /root/.bun/bin/bun --version
+ENV PATH="/root/.bun/bin:${PATH}"
+
+RUN corepack enable
+
 WORKDIR /app
 
 # Install system utilities present in bookworm but missing in bookworm-slim.

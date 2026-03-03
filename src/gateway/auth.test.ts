@@ -7,6 +7,7 @@ import {
   authorizeWsControlUiGatewayConnect,
   resolveGatewayAuth,
 } from "./auth.js";
+import { validateAuthModeNoneBind } from "./startup-auth.js";
 
 function createLimiterSpy(): AuthRateLimiter & {
   check: ReturnType<typeof vi.fn>;
@@ -631,5 +632,47 @@ describe("trusted-proxy auth", () => {
 
     expect(res.ok).toBe(true);
     expect(res.user).toBe("nick@example.com");
+  });
+});
+
+describe("validateAuthModeNoneBind", () => {
+  it("blocks 0.0.0.0 + mode none", () => {
+    expect(() => validateAuthModeNoneBind({ authMode: "none", bindHost: "0.0.0.0" })).toThrow(
+      /not allowed on non-loopback/,
+    );
+  });
+
+  it("allows 127.0.0.1 + mode none", () => {
+    expect(() =>
+      validateAuthModeNoneBind({ authMode: "none", bindHost: "127.0.0.1" }),
+    ).not.toThrow();
+  });
+
+  it("allows ::1 + mode none", () => {
+    expect(() => validateAuthModeNoneBind({ authMode: "none", bindHost: "::1" })).not.toThrow();
+  });
+
+  it("blocks :: (IPv6 any) + mode none", () => {
+    expect(() => validateAuthModeNoneBind({ authMode: "none", bindHost: "::" })).toThrow(
+      /not allowed on non-loopback/,
+    );
+  });
+
+  it("blocks public IP + mode none", () => {
+    expect(() => validateAuthModeNoneBind({ authMode: "none", bindHost: "192.168.1.100" })).toThrow(
+      /not allowed on non-loopback/,
+    );
+  });
+
+  it("allows any address + mode none + allowInsecure override", () => {
+    expect(() =>
+      validateAuthModeNoneBind({ authMode: "none", bindHost: "0.0.0.0", allowInsecure: true }),
+    ).not.toThrow();
+  });
+
+  it("does not block mode token on any address", () => {
+    expect(() =>
+      validateAuthModeNoneBind({ authMode: "token", bindHost: "0.0.0.0" }),
+    ).not.toThrow();
   });
 });

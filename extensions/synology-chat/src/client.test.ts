@@ -53,7 +53,64 @@ function mockFailureResponse(statusCode = 500) {
   mockResponse(statusCode, "error");
 }
 
+describe("allowInsecureSsl defaults", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+    fakeNowMs += 10_000;
+    vi.setSystemTime(fakeNowMs);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  beforeEach(async () => {
+    ({ sendMessage, sendFileUrl, fetchChatUsers, resolveLegacyWebhookNameToChatUserId } =
+      await import("./client.js"));
+  });
+
+  it("defaults to certificate verification (rejectUnauthorized: true) for sendMessage", async () => {
+    mockSuccessResponse();
+    await settleTimers(sendMessage("https://nas.example.com/incoming", "Hello"));
+    const httpsRequest = vi.mocked(https.request);
+    expect(httpsRequest).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ rejectUnauthorized: true }),
+      expect.any(Function),
+    );
+  });
+
+  it("allowInsecureSsl = true is NOT the default", async () => {
+    mockSuccessResponse();
+    await settleTimers(sendMessage("https://nas.example.com/incoming", "Hello"));
+    const httpsRequest = vi.mocked(https.request);
+    const opts = httpsRequest.mock.calls[0]?.[1] as { rejectUnauthorized?: boolean } | undefined;
+    expect(opts?.rejectUnauthorized).not.toBe(false);
+  });
+});
+
 function installFakeTimerHarness() {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.resetModules();
+    vi.useFakeTimers();
+    fakeNowMs += 10_000;
+    vi.setSystemTime(fakeNowMs);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  beforeEach(async () => {
+    ({ sendMessage, sendFileUrl, fetchChatUsers, resolveLegacyWebhookNameToChatUserId } =
+      await import("./client.js"));
+  });
+}
+
+describe("sendMessage", () => {
+  installFakeTimerHarness();
   beforeEach(() => {
     vi.clearAllMocks();
     vi.resetModules();

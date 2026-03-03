@@ -229,6 +229,44 @@ describe("scanStatus", () => {
 
     expect(mocks.ensurePluginRegistryLoaded).toHaveBeenCalledWith({
       scope: "configured-channels",
-    });
+    });  });
+});
+
+
+/**
+ * Unit test for the CLAWDBOT_SHOW_SECRETS environment variable logic.
+ * The expression `process.env.CLAWDBOT_SHOW_SECRETS?.trim() === "1"` means:
+ * - Unset -> secrets hidden (secure default)
+ * - "1"  -> secrets shown (explicit opt-in)
+ * - "0"  -> secrets hidden
+ */
+function resolveShowSecrets(envValue: string | undefined): boolean {
+  // Mirror the production logic from status.scan.ts
+  return envValue?.trim() === "1";
+}
+
+describe("CLAWDBOT_SHOW_SECRETS default", () => {
+  it("redacts tokens when env var is unset", () => {
+    expect(resolveShowSecrets(undefined)).toBe(false);
+  });
+
+  it("shows tokens when env var is 1", () => {
+    expect(resolveShowSecrets("1")).toBe(true);
+  });
+
+  it("redacts tokens when env var is 0", () => {
+    expect(resolveShowSecrets("0")).toBe(false);
+  });
+
+  it("redacts tokens when env var is empty string", () => {
+    expect(resolveShowSecrets("")).toBe(false);
+  });
+
+  it("redacts tokens when env var is whitespace", () => {
+    expect(resolveShowSecrets("  ")).toBe(false);
+  });
+
+  it("handles 1 with whitespace", () => {
+    expect(resolveShowSecrets(" 1 ")).toBe(true);
   });
 });

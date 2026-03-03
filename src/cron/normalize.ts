@@ -86,6 +86,13 @@ function coercePayload(payload: UnknownRecord) {
   const next: UnknownRecord = { ...payload };
   // Back-compat: older configs used `provider` for delivery channel.
   migrateLegacyCronPayload(next);
+  // Back-compat: migrate deprecated `allowUnsafeExternalContent` → `dangerouslyAllowUnsafeExternalContent`.
+  if ("allowUnsafeExternalContent" in next && !("dangerouslyAllowUnsafeExternalContent" in next)) {
+    next.dangerouslyAllowUnsafeExternalContent = next.allowUnsafeExternalContent;
+    delete next.allowUnsafeExternalContent;
+  } else if ("allowUnsafeExternalContent" in next) {
+    delete next.allowUnsafeExternalContent;
+  }
   const kindRaw = typeof next.kind === "string" ? next.kind.trim().toLowerCase() : "";
   if (kindRaw === "agentturn") {
     next.kind = "agentTurn";
@@ -101,7 +108,7 @@ function coercePayload(payload: UnknownRecord) {
       typeof next.model === "string" ||
       typeof next.thinking === "string" ||
       typeof next.timeoutSeconds === "number" ||
-      typeof next.allowUnsafeExternalContent === "boolean";
+      typeof next.dangerouslyAllowUnsafeExternalContent === "boolean";
     if (hasMessage) {
       next.kind = "agentTurn";
     } else if (hasText) {
@@ -155,10 +162,10 @@ function coercePayload(payload: UnknownRecord) {
     }
   }
   if (
-    "allowUnsafeExternalContent" in next &&
-    typeof next.allowUnsafeExternalContent !== "boolean"
+    "dangerouslyAllowUnsafeExternalContent" in next &&
+    typeof next.dangerouslyAllowUnsafeExternalContent !== "boolean"
   ) {
-    delete next.allowUnsafeExternalContent;
+    delete next.dangerouslyAllowUnsafeExternalContent;
   }
   return next;
 }
@@ -263,10 +270,17 @@ function copyTopLevelAgentTurnFields(next: UnknownRecord, payload: UnknownRecord
     payload.timeoutSeconds = next.timeoutSeconds;
   }
   if (
-    typeof payload.allowUnsafeExternalContent !== "boolean" &&
+    typeof payload.dangerouslyAllowUnsafeExternalContent !== "boolean" &&
+    typeof next.dangerouslyAllowUnsafeExternalContent === "boolean"
+  ) {
+    payload.dangerouslyAllowUnsafeExternalContent = next.dangerouslyAllowUnsafeExternalContent;
+  }
+  // Backward compat: migrate legacy top-level `allowUnsafeExternalContent`.
+  if (
+    typeof payload.dangerouslyAllowUnsafeExternalContent !== "boolean" &&
     typeof next.allowUnsafeExternalContent === "boolean"
   ) {
-    payload.allowUnsafeExternalContent = next.allowUnsafeExternalContent;
+    payload.dangerouslyAllowUnsafeExternalContent = next.allowUnsafeExternalContent;
   }
 }
 
@@ -303,7 +317,8 @@ function stripLegacyTopLevelFields(next: UnknownRecord) {
   delete next.model;
   delete next.thinking;
   delete next.timeoutSeconds;
-  delete next.allowUnsafeExternalContent;
+  delete next.dangerouslyAllowUnsafeExternalContent;
+  delete next.allowUnsafeExternalContent; // backward compat: strip deprecated name
   delete next.message;
   delete next.text;
   delete next.deliver;

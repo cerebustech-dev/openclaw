@@ -1727,7 +1727,73 @@ description: test skill
               provider: "default",
               id: "OPENCLAW_GATEWAY_PASSWORD",
             },
-          },
+
+      },
+    };
+
+    const res = await audit(cfg);
+
+    expectFinding(res, "browser.remote_cdp_http", "warn");
+  });
+
+  it("warns when control UI allows insecure auth", async () => {
+    const cfg: OpenClawConfig = {
+      gateway: {
+        controlUi: { allowInsecureAuth: true },
+      },
+    };
+
+    const res = await audit(cfg);
+
+    expect(res.findings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          checkId: "gateway.control_ui.insecure_auth",
+          severity: "warn",
+        }),
+        expect.objectContaining({
+          checkId: "config.insecure_or_dangerous_flags",
+          severity: "warn",
+          detail: expect.stringContaining("gateway.controlUi.allowInsecureAuth=true"),
+        }),
+      ]),
+    );
+  });
+
+  it("warns when control UI device auth is disabled", async () => {
+    const cfg: OpenClawConfig = {
+      gateway: {
+        controlUi: { dangerouslyDisableDeviceAuth: true },
+      },
+    };
+
+    const res = await audit(cfg);
+
+    expect(res.findings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          checkId: "gateway.control_ui.device_auth_disabled",
+          severity: "critical",
+        }),
+        expect.objectContaining({
+          checkId: "config.insecure_or_dangerous_flags",
+          severity: "warn",
+          detail: expect.stringContaining("gateway.controlUi.dangerouslyDisableDeviceAuth=true"),
+        }),
+      ]),
+    );
+  });
+
+  it("warns when insecure/dangerous debug flags are enabled", async () => {
+    const cfg: OpenClawConfig = {
+      hooks: {
+        gmail: { dangerouslyAllowUnsafeExternalContent: true },
+        mappings: [{ dangerouslyAllowUnsafeExternalContent: true }],
+      },
+      tools: {
+        exec: {
+          applyPatch: {
+            workspaceOnly: false,          },
         },
         browser: {
           enabled: true,
@@ -1775,8 +1841,7 @@ description: test skill
     }
     if (testCase.expectedNoFinding) {
       expectNoFinding(res, testCase.expectedNoFinding);
-    }
-  });
+    }  });
 
   it("warns on insecure or dangerous flags", async () => {
     const cases = [

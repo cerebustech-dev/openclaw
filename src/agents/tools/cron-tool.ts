@@ -331,7 +331,7 @@ Use jobId as the canonical identifier; id is accepted for compatibility. Use con
               "model",
               "thinking",
               "timeoutSeconds",
-              "allowUnsafeExternalContent",
+              "dangerouslyAllowUnsafeExternalContent",
             ]);
             const synthetic: Record<string, unknown> = {};
             let found = false;
@@ -474,7 +474,7 @@ Use jobId as the canonical identifier; id is accepted for compatibility. Use con
               "sessionTarget",
               "wakeMode",
               "failureAlert",
-              "allowUnsafeExternalContent",
+              "dangerouslyAllowUnsafeExternalContent",
             ]);
             const synthetic: Record<string, unknown> = {};
             let found = false;

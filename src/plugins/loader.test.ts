@@ -1861,6 +1861,7 @@ module.exports = { id: "skipped-scoped-only", register() { throw new Error("skip
     const registry = loadRegistryFromSinglePlugin({
       plugin,
       pluginConfig: {
+        allow: ["configurable"],
         entries: {
           configurable: {
             config: "nope" as unknown as Record<string, unknown>,
@@ -3683,5 +3684,76 @@ describe("clearPluginLoaderCache", () => {
     expect(resolveMemoryFlushPlan({})).toBeNull();
     expect(getMemoryRuntime()).toBeUndefined();
     expect(getMemoryEmbeddingProvider("stale")).toBeUndefined();
+  });
+
+  it("blocks non-bundled plugin when plugins.allow is empty", () => {
+    useNoBundledPlugins();
+    const plugin = writePlugin({
+      id: "untrusted-ext",
+      body: `module.exports = { id: "untrusted-ext", register() {} };`,
+    });
+
+    const registry = loadOpenClawPlugins({
+      cache: false,
+      workspaceDir: plugin.dir,
+      config: {
+        plugins: {
+          load: { paths: [plugin.file] },
+          // allow is intentionally empty / omitted
+        },
+      },
+    });
+
+    const record = registry.plugins.find((entry) => entry.id === "untrusted-ext");
+    expect(record?.status).toBe("disabled");
+    expect(record?.error).toContain("not in allowlist");
+  });
+
+  it("loads bundled plugin when plugins.allow is empty", () => {
+    const bundledDir = makeTempDir();
+    writePlugin({
+      id: "device-pair",
+      body: `module.exports = { id: "device-pair", register() {} };`,
+      dir: bundledDir,
+      filename: "device-pair.cjs",
+    });
+    process.env.OPENCLAW_BUNDLED_PLUGINS_DIR = bundledDir;
+
+    const registry = loadOpenClawPlugins({
+      cache: false,
+      workspaceDir: bundledDir,
+      config: {
+        plugins: {
+          enabled: true,
+          // allow is intentionally empty / omitted; bundled plugins should still load
+        },
+      },
+    });
+
+    const record = registry.plugins.find((entry) => entry.id === "device-pair");
+    expect(record?.status).toBe("loaded");
+    expect(record?.origin).toBe("bundled");
+  });
+
+  it("loads non-bundled plugin when explicitly in plugins.allow", () => {
+    useNoBundledPlugins();
+    const plugin = writePlugin({
+      id: "trusted-ext",
+      body: `module.exports = { id: "trusted-ext", register() {} };`,
+    });
+
+    const registry = loadOpenClawPlugins({
+      cache: false,
+      workspaceDir: plugin.dir,
+      config: {
+        plugins: {
+          load: { paths: [plugin.file] },
+          allow: ["trusted-ext"],
+        },
+      },
+    });
+
+    const record = registry.plugins.find((entry) => entry.id === "trusted-ext");
+    expect(record?.status).toBe("loaded");
   });
 });

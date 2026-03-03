@@ -133,7 +133,7 @@ describe("CronService store migrations", () => {
       expect(job.payload.model).toBe("openrouter/deepseek/deepseek-r1");
       expect(job.payload.thinking).toBe("high");
       expect(job.payload.timeoutSeconds).toBe(120);
-      expect(job.payload.allowUnsafeExternalContent).toBe(true);
+      expect(job.payload.dangerouslyAllowUnsafeExternalContent).toBe(true);
     }
     expect(job?.delivery).toEqual({
       mode: "announce",

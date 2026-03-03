@@ -1293,7 +1293,7 @@ export const FIELD_HELP: Record<string, string> = {
     "Text-only fallback template used when rich payload rendering is not desired or not supported. Use this to provide a concise, consistent summary string for chat delivery surfaces.",
   "hooks.mappings[].deliver":
     "Controls whether mapping execution results are delivered back to a channel destination versus being processed silently. Disable delivery for background automations that should not post user-facing output.",
-  "hooks.mappings[].allowUnsafeExternalContent":
+  "hooks.mappings[].dangerouslyAllowUnsafeExternalContent":
     "When true, mapping content may include less-sanitized external payload data in generated messages. Keep false by default and enable only for trusted sources with reviewed transform logic.",
   "hooks.mappings[].channel":
     'Delivery channel override for mapping outputs (for example "last", "telegram", "discord", "slack", "signal", "imessage", or "msteams"). Keep channel overrides explicit to avoid accidental cross-channel sends.',
@@ -1325,7 +1325,7 @@ export const FIELD_HELP: Record<string, string> = {
     "Public callback URL Gmail or intermediaries invoke to deliver notifications into this hook pipeline. Keep this URL protected with token validation and restricted network exposure.",
   "hooks.gmail.includeBody":
     "When true, fetch and include email body content for downstream mapping/agent processing. Keep false unless body text is required, because this increases payload size and sensitivity.",
-  "hooks.gmail.allowUnsafeExternalContent":
+  "hooks.gmail.dangerouslyAllowUnsafeExternalContent":
     "Allows less-sanitized external Gmail content to pass into processing when enabled. Keep disabled for safer defaults, and enable only for trusted mail streams with controlled transforms.",
   "hooks.gmail.serve":
     "Local callback server settings block for directly receiving Gmail notifications without a separate ingress layer. Enable only when this process should terminate webhook traffic itself.",

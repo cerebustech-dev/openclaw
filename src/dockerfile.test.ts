@@ -6,6 +6,32 @@ import { describe, expect, it } from "vitest";
 const repoRoot = resolve(fileURLToPath(new URL(".", import.meta.url)), "..");
 const dockerfilePath = join(repoRoot, "Dockerfile");
 
+const composePath = join(repoRoot, "docker-compose.yml");
+const dockerReleaseYmlPath = join(repoRoot, ".github/workflows/docker-release.yml");
+
+describe("docker-compose.yml", () => {
+  it("defaults gateway bind to loopback, not lan", async () => {
+    const compose = await readFile(composePath, "utf8");
+    expect(compose).toContain("${OPENCLAW_GATEWAY_BIND:-loopback}");
+    expect(compose).not.toContain("${OPENCLAW_GATEWAY_BIND:-lan}");
+  });
+});
+
+describe("docker-release.yml GitHub Actions pinning", () => {
+  it("pins all uses: references to SHA hashes", async () => {
+    const workflow = await readFile(dockerReleaseYmlPath, "utf8");
+    const usesLines = workflow
+      .split("\n")
+      .filter((line) => line.trim().startsWith("uses:"))
+      .map((line) => line.trim());
+
+    expect(usesLines.length).toBeGreaterThan(0);
+    for (const line of usesLines) {
+      expect(line).toMatch(/@[a-f0-9]{40}/);
+    }
+  });
+});
+
 describe("Dockerfile", () => {
   it("uses shared multi-arch base image refs for all root Node stages", async () => {
     const dockerfile = await readFile(dockerfilePath, "utf8");
@@ -21,6 +47,16 @@ describe("Dockerfile", () => {
     expect(dockerfile).toContain("FROM ${OPENCLAW_NODE_BOOKWORM_SLIM_IMAGE} AS base-slim");
     expect(dockerfile).toContain("current multi-arch manifest list entry");
     expect(dockerfile).not.toContain("current amd64 entry");
+  });
+
+  it("does NOT contain unpinned curl | bash for Bun install", async () => {
+    const dockerfile = await readFile(dockerfilePath, "utf8");
+    expect(dockerfile).not.toMatch(/curl\s.*\|\s*bash/);
+  });
+
+  it("references a pinned BUN_VERSION ARG", async () => {
+    const dockerfile = await readFile(dockerfilePath, "utf8");
+    expect(dockerfile).toContain("ARG BUN_VERSION=");
   });
 
   it("installs optional browser dependencies after pnpm install", async () => {

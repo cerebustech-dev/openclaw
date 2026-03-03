@@ -13,6 +13,7 @@ import {
   hasGatewayTokenEnvCandidate,
   readGatewayTokenEnv,
 } from "./credentials.js";
+import { isLoopbackHost } from "./net.js";
 import { resolveRequiredConfiguredSecretRefInputString } from "./resolve-configured-secret-input-string.js";
 
 export function mergeGatewayAuthConfig(
@@ -312,5 +313,30 @@ export function assertHooksTokenSeparateFromGatewayAuth(params: {
   }
   throw new Error(
     "Invalid config: hooks.token must not match gateway auth token. Set a distinct hooks.token for hook ingress.",
+  );
+}
+
+/**
+ * Refuse auth mode "none" on non-loopback bind addresses.
+ * Covers IPv4 (0.0.0.0, public IPs), IPv6 (::, public), and hostnames.
+ * An `allowInsecure: true` override bypasses the check (auditable).
+ */
+export function validateAuthModeNoneBind(params: {
+  authMode: string;
+  bindHost: string;
+  allowInsecure?: boolean;
+}): void {
+  if (params.authMode !== "none") {
+    return;
+  }
+  if (params.allowInsecure === true) {
+    return;
+  }
+  if (isLoopbackHost(params.bindHost)) {
+    return;
+  }
+  throw new Error(
+    `gateway auth mode=none is not allowed on non-loopback address "${params.bindHost}". ` +
+      "Either set gateway.auth.mode to token/password, or bind to loopback (127.0.0.1/::1).",
   );
 }

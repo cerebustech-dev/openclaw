@@ -16,7 +16,7 @@ export type HookMappingResolved = {
   messageTemplate?: string;
   textTemplate?: string;
   deliver?: boolean;
-  allowUnsafeExternalContent?: boolean;
+  dangerouslyAllowUnsafeExternalContent?: boolean;
   channel?: HookMessageChannel;
   to?: string;
   model?: string;
@@ -51,7 +51,7 @@ export type HookAction =
       wakeMode: "now" | "next-heartbeat";
       sessionKey?: string;
       deliver?: boolean;
-      allowUnsafeExternalContent?: boolean;
+      dangerouslyAllowUnsafeExternalContent?: boolean;
       channel?: HookMessageChannel;
       to?: string;
       model?: string;
@@ -91,7 +91,7 @@ type HookTransformResult = Partial<{
   name: string;
   sessionKey: string;
   deliver: boolean;
-  allowUnsafeExternalContent: boolean;
+  dangerouslyAllowUnsafeExternalContent: boolean;
   channel: HookMessageChannel;
   to: string;
   model: string;
@@ -108,7 +108,7 @@ export function resolveHookMappings(
   opts?: { configDir?: string },
 ): HookMappingResolved[] {
   const presets = hooks?.presets ?? [];
-  const gmailAllowUnsafe = hooks?.gmail?.allowUnsafeExternalContent;
+  const gmailAllowUnsafe = hooks?.gmail?.dangerouslyAllowUnsafeExternalContent;
   const mappings: HookMappingConfig[] = [];
   if (hooks?.mappings) {
     mappings.push(...hooks.mappings);
@@ -122,7 +122,7 @@ export function resolveHookMappings(
       mappings.push(
         ...presetMappings.map((mapping) => ({
           ...mapping,
-          allowUnsafeExternalContent: gmailAllowUnsafe,
+          dangerouslyAllowUnsafeExternalContent: gmailAllowUnsafe,
         })),
       );
       continue;
@@ -211,7 +211,7 @@ function normalizeHookMapping(
     messageTemplate: mapping.messageTemplate,
     textTemplate: mapping.textTemplate,
     deliver: mapping.deliver,
-    allowUnsafeExternalContent: mapping.allowUnsafeExternalContent,
+    dangerouslyAllowUnsafeExternalContent: mapping.dangerouslyAllowUnsafeExternalContent,
     channel: mapping.channel,
     to: mapping.to,
     model: mapping.model,
@@ -262,7 +262,7 @@ function buildActionFromMapping(
       wakeMode: mapping.wakeMode ?? "now",
       sessionKey: renderOptional(mapping.sessionKey, ctx),
       deliver: mapping.deliver,
-      allowUnsafeExternalContent: mapping.allowUnsafeExternalContent,
+      dangerouslyAllowUnsafeExternalContent: mapping.dangerouslyAllowUnsafeExternalContent,
       channel: mapping.channel,
       to: renderOptional(mapping.to, ctx),
       model: renderOptional(mapping.model, ctx),
@@ -300,10 +300,10 @@ function mergeAction(
     agentId: override.agentId ?? baseAgent?.agentId,
     sessionKey: override.sessionKey ?? baseAgent?.sessionKey,
     deliver: typeof override.deliver === "boolean" ? override.deliver : baseAgent?.deliver,
-    allowUnsafeExternalContent:
-      typeof override.allowUnsafeExternalContent === "boolean"
-        ? override.allowUnsafeExternalContent
-        : baseAgent?.allowUnsafeExternalContent,
+    dangerouslyAllowUnsafeExternalContent:
+      typeof override.dangerouslyAllowUnsafeExternalContent === "boolean"
+        ? override.dangerouslyAllowUnsafeExternalContent
+        : baseAgent?.dangerouslyAllowUnsafeExternalContent,
     channel: override.channel ?? baseAgent?.channel,
     to: override.to ?? baseAgent?.to,
     model: override.model ?? baseAgent?.model,

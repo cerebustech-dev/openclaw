@@ -13,6 +13,7 @@ export function setDefaultSecurityHeaders(
   opts?: { strictTransportSecurity?: string },
 ) {
   res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
   res.setHeader("Referrer-Policy", "no-referrer");
   res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
   const strictTransportSecurity = opts?.strictTransportSecurity;

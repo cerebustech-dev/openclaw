@@ -34,8 +34,7 @@ export async function ensureLoaded(
   const fileMtimeMs = await getFileMtimeMs(state.deps.storePath);
   const loaded = await loadCronStore(state.deps.storePath);
   const jobs = (loaded.jobs ?? []) as unknown as Array<Record<string, unknown>>;
-  const { mutated } = normalizeStoredCronJobs(jobs);
-  state.store = { version: 1, jobs: jobs as unknown as CronJob[] };
+  const { mutated } = normalizeStoredCronJobs(jobs);  state.store = { version: 1, jobs: jobs as unknown as CronJob[] };
   state.storeLoadedAtMs = state.deps.nowMs();
   state.storeFileMtimeMs = fileMtimeMs;
 

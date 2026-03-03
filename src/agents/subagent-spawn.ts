@@ -1,7 +1,10 @@
 import crypto from "node:crypto";
 import { promises as fs } from "node:fs";
 import { formatThinkingLevels, normalizeThinkLevel } from "../auto-reply/thinking.js";
-import { DEFAULT_SUBAGENT_MAX_SPAWN_DEPTH } from "../config/agent-limits.js";
+import {
+  DEFAULT_SUBAGENT_MAX_SPAWN_DEPTH,
+  DEFAULT_SUBAGENT_MAX_SPAWNS_PER_MINUTE,
+} from "../config/agent-limits.js";
 import { loadConfig } from "../config/config.js";
 import { mergeSessionEntry, updateSessionStore } from "../config/sessions.js";
 import { callGateway } from "../gateway/call.js";
@@ -35,7 +38,11 @@ import {
 } from "./subagent-attachments.js";
 import { resolveSubagentCapabilities } from "./subagent-capabilities.js";
 import { getSubagentDepthFromSessionStore } from "./subagent-depth.js";
-import { countActiveRunsForSession, registerSubagentRun } from "./subagent-registry.js";
+import {
+  countActiveRunsForSession,
+  listSubagentRunsForRequester,
+  registerSubagentRun,
+} from "./subagent-registry.js";
 import { readStringParam } from "./tools/common.js";
 import {
   resolveDisplaySessionKey,
@@ -291,6 +298,40 @@ async function ensureThreadBindingForSubagentSpawn(params: {
   }
 }
 
+const RATE_LIMIT_WINDOW_MS = 60_000;
+
+/**
+ * Check whether a requester session has exceeded the subagent spawn rate limit
+ * within the sliding window (default: 1 minute). Counts `createdAt` timestamps
+ * from SubagentRunRecord entries that fall within the window.
+ *
+ * @returns An error string if the rate limit is exceeded, or `undefined` if allowed.
+ */
+export function checkSubagentSpawnRateLimit(
+  requesterSessionKey: string,
+  opts?: {
+    maxSpawnsPerMinute?: number;
+    nowMs?: number;
+  },
+): string | undefined {
+  const maxSpawns = opts?.maxSpawnsPerMinute ?? DEFAULT_SUBAGENT_MAX_SPAWNS_PER_MINUTE;
+  const now = opts?.nowMs ?? Date.now();
+  const windowStart = now - RATE_LIMIT_WINDOW_MS;
+
+  const runs = listSubagentRunsForRequester(requesterSessionKey);
+  let recentCount = 0;
+  for (const run of runs) {
+    if (run.createdAt >= windowStart) {
+      recentCount += 1;
+    }
+  }
+
+  if (recentCount >= maxSpawns) {
+    return `sessions_spawn rate limit exceeded (${recentCount} spawns in the last 60s, max: ${maxSpawns})`;
+  }
+  return undefined;
+}
+
 export async function spawnSubagentDirect(
   params: SpawnSubagentParams,
   ctx: SpawnSubagentContext,
@@ -384,6 +425,18 @@ export async function spawnSubagentDirect(
     return {
       status: "forbidden",
       error: `sessions_spawn has reached max active children for this session (${activeChildren}/${maxChildren})`,
+    };
+  }
+
+  const maxSpawnsPerMinute =
+    cfg.agents?.defaults?.subagents?.maxSpawnsPerMinute ?? DEFAULT_SUBAGENT_MAX_SPAWNS_PER_MINUTE;
+  const rateLimitError = checkSubagentSpawnRateLimit(requesterInternalKey, {
+    maxSpawnsPerMinute,
+  });
+  if (rateLimitError) {
+    return {
+      status: "forbidden",
+      error: rateLimitError,
     };
   }
 

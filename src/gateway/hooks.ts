@@ -216,7 +216,7 @@ export type HookAgentPayload = {
 
 export type HookAgentDispatchPayload = Omit<HookAgentPayload, "sessionKey"> & {
   sessionKey: string;
-  allowUnsafeExternalContent?: boolean;
+  dangerouslyAllowUnsafeExternalContent?: boolean;
   externalContentSource?: HookExternalContentSource;
 };
 

@@ -10,6 +10,7 @@ import {
 } from "../infra/shell-env.js";
 import { logInfo } from "../logger.js";
 import { parseAgentSessionKey, resolveAgentIdFromSessionKey } from "../routing/session-key.js";
+import { checkElevatedFullGuardrail } from "../security/dangerous-command-patterns.js";
 import { markBackgrounded } from "./bash-process-registry.js";
 import { processGatewayAllowlist } from "./bash-tools.exec-host-gateway.js";
 import { executeNodeHostCommand } from "./bash-tools.exec-host-node.js";
@@ -356,6 +357,15 @@ export function createExecTool(
       const bypassApprovals = elevatedRequested && elevatedMode === "full";
       if (bypassApprovals) {
         ask = "off";
+
+        // Guardrail: block obviously destructive commands even in elevated-full mode
+        const guardrail = checkElevatedFullGuardrail(
+          params.command,
+          defaults?.cwd ?? process.cwd(),
+        );
+        if (!guardrail.allowed) {
+          throw new Error(guardrail.reason);
+        }
       }
 
       const sandbox = host === "sandbox" ? defaults?.sandbox : undefined;

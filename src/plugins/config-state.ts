@@ -270,6 +270,14 @@ export function resolveEnableState(
   if (origin === "bundled") {
     return { enabled: false, reason: "bundled (disabled by default)" };
   }
+  // Block non-bundled plugins when the allow list is empty (no explicit trust).
+  // Non-bundled plugins must be explicitly listed in plugins.allow to load.
+  if (config.allow.length === 0) {
+    return {
+      enabled: false,
+      reason: "not in allowlist (non-bundled plugins require explicit allow)",
+    };
+  }
   return { enabled: true };
 }
 

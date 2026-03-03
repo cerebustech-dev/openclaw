@@ -1,7 +1,40 @@
 import path from "node:path";
 import { z } from "zod";
+import { logWarn } from "../logger.js";
 import { InstallRecordShape } from "./zod-schema.installs.js";
 import { sensitive } from "./zod-schema.sensitive.js";
+
+/**
+ * Migrate deprecated `allowUnsafeExternalContent` to `dangerouslyAllowUnsafeExternalContent`.
+ * Accepts either field name; logs a deprecation warning when the old name is used.
+ */
+function migrateUnsafeExternalContentFlag<
+  T extends {
+    allowUnsafeExternalContent?: boolean;
+    dangerouslyAllowUnsafeExternalContent?: boolean;
+  },
+>(val: T, context: string): Omit<T, "allowUnsafeExternalContent"> {
+  if (
+    val.allowUnsafeExternalContent !== undefined &&
+    val.dangerouslyAllowUnsafeExternalContent === undefined
+  ) {
+    logWarn(
+      `[config] "${context}.allowUnsafeExternalContent" is deprecated. ` +
+        `Use "${context}.dangerouslyAllowUnsafeExternalContent" instead.`,
+    );
+    const { allowUnsafeExternalContent, ...rest } = val;
+    return { ...rest, dangerouslyAllowUnsafeExternalContent: allowUnsafeExternalContent } as Omit<
+      T,
+      "allowUnsafeExternalContent"
+    >;
+  }
+  // If new name is present (or neither is), strip the old key if both are present.
+  if ("allowUnsafeExternalContent" in val) {
+    const { allowUnsafeExternalContent: _deprecated, ...rest } = val;
+    return rest;
+  }
+  return val as Omit<T, "allowUnsafeExternalContent">;
+}
 
 function isSafeRelativeModulePath(raw: string): boolean {
   const value = raw.trim();
@@ -48,6 +81,8 @@ export const HookMappingSchema = z
     messageTemplate: z.string().optional(),
     textTemplate: z.string().optional(),
     deliver: z.boolean().optional(),
+    dangerouslyAllowUnsafeExternalContent: z.boolean().optional(),
+    /** @deprecated Use `dangerouslyAllowUnsafeExternalContent` instead. Accepted for backward compat. */
     allowUnsafeExternalContent: z.boolean().optional(),
     channel: z
       .union([
@@ -75,6 +110,7 @@ export const HookMappingSchema = z
       .optional(),
   })
   .strict()
+  .transform((val) => migrateUnsafeExternalContentFlag(val, "hooks.mappings[]"))
   .optional();
 
 export const InternalHookHandlerSchema = z
@@ -129,6 +165,8 @@ export const HooksGmailSchema = z
     includeBody: z.boolean().optional(),
     maxBytes: z.number().int().positive().optional(),
     renewEveryMinutes: z.number().int().positive().optional(),
+    dangerouslyAllowUnsafeExternalContent: z.boolean().optional(),
+    /** @deprecated Use `dangerouslyAllowUnsafeExternalContent` instead. Accepted for backward compat. */
     allowUnsafeExternalContent: z.boolean().optional(),
     serve: z
       .object({
@@ -158,4 +196,5 @@ export const HooksGmailSchema = z
       .optional(),
   })
   .strict()
+  .transform((val) => migrateUnsafeExternalContentFlag(val, "hooks.gmail"))
   .optional();

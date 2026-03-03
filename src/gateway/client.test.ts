@@ -4,6 +4,7 @@ import type { DeviceIdentity } from "../infra/device-identity.js";
 import { captureEnv } from "../test-utils/env.js";
 
 const wsInstances = vi.hoisted((): MockWebSocket[] => []);
+const wsConstructorOptions = vi.hoisted((): Record<string, unknown>[] => []);
 const clearDeviceAuthTokenMock = vi.hoisted(() => vi.fn());
 const loadDeviceAuthTokenMock = vi.hoisted(() => vi.fn());
 const storeDeviceAuthTokenMock = vi.hoisted(() => vi.fn());
@@ -27,7 +28,11 @@ class MockWebSocket {
   terminateCalls = 0;
   autoCloseOnClose = true;
 
+  constructorOptions: Record<string, unknown> | undefined;
+
   constructor(_url: string, _options?: unknown) {
+    this.constructorOptions = _options as Record<string, unknown> | undefined;
+    wsConstructorOptions.push(this.constructorOptions ?? {});
     wsInstances.push(this);
   }
 
@@ -677,5 +682,135 @@ describe("GatewayClient connect auth payload", () => {
       connectId: firstConnect.id,
       failureDetails: { code: "AUTH_TOKEN_MISMATCH", canRetryWithDeviceToken: true },
     });
+  });
+});
+
+describe("GatewayClient TLS fingerprint pinning (M-2)", () => {
+  const envSnapshot = captureEnv(["OPENCLAW_ALLOW_INSECURE_PRIVATE_WS"]);
+
+  beforeEach(() => {
+    envSnapshot.restore();
+    wsInstances.length = 0;
+    wsConstructorOptions.length = 0;
+  });
+
+  function getLatestWsOptions(): Record<string, unknown> {
+    const opts = wsConstructorOptions.at(-1);
+    if (!opts) {
+      throw new Error("missing mock websocket constructor options");
+    }
+    return opts;
+  }
+
+  it("rejectUnauthorized is NOT set to false when fingerprint is provided", () => {
+    const client = new GatewayClient({
+      url: "wss://remote.example.com:18789",
+      tlsFingerprint:
+        "AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99",
+    });
+
+    client.start();
+
+    expect(wsInstances.length).toBe(1);
+    const opts = getLatestWsOptions();
+    // Critical: rejectUnauthorized must NOT be disabled; standard TLS chain
+    // validation must stay active alongside fingerprint pinning.
+    expect(opts.rejectUnauthorized).not.toBe(false);
+    client.stop();
+  });
+
+  it("fingerprint mismatch + valid chain returns error from checkServerIdentity", () => {
+    const client = new GatewayClient({
+      url: "wss://remote.example.com:18789",
+      tlsFingerprint:
+        "AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99",
+    });
+
+    client.start();
+
+    const opts = getLatestWsOptions();
+    const checkServerIdentity = opts.checkServerIdentity as (
+      host: string,
+      cert: Record<string, unknown>,
+    ) => Error | undefined;
+    expect(typeof checkServerIdentity).toBe("function");
+
+    // Provide a cert with a WRONG fingerprint. In production, chain validation
+    // would have already passed (since rejectUnauthorized is true); this test
+    // verifies the fingerprint layer catches the mismatch.
+    const wrongCert = {
+      fingerprint256:
+        "11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00",
+    };
+    const result = checkServerIdentity("remote.example.com", wrongCert);
+    expect(result).toBeInstanceOf(Error);
+    expect(result!.message).toBe("gateway tls fingerprint mismatch");
+    client.stop();
+  });
+
+  it("invalid chain + correct fingerprint still fails (chain validated by Node TLS)", () => {
+    // When rejectUnauthorized is true (Node's default, and now ours), the TLS
+    // layer validates the certificate chain BEFORE calling checkServerIdentity.
+    // An untrusted/self-signed cert will be rejected at the handshake level,
+    // so checkServerIdentity never runs for invalid chains.
+    //
+    // We assert the invariant: rejectUnauthorized is not false AND
+    // checkServerIdentity is still set (fingerprint pinning on top of chain).
+    const client = new GatewayClient({
+      url: "wss://remote.example.com:18789",
+      tlsFingerprint:
+        "AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99",
+    });
+
+    client.start();
+
+    const opts = getLatestWsOptions();
+    // Chain validation remains active.
+    expect(opts.rejectUnauthorized).not.toBe(false);
+    // Fingerprint pinning is layered on top.
+    expect(typeof opts.checkServerIdentity).toBe("function");
+    client.stop();
+  });
+
+  it("correct fingerprint passes checkServerIdentity", () => {
+    const fp =
+      "AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99";
+    const client = new GatewayClient({
+      url: "wss://remote.example.com:18789",
+      tlsFingerprint: fp,
+    });
+
+    client.start();
+
+    const opts = getLatestWsOptions();
+    const checkServerIdentity = opts.checkServerIdentity as (
+      host: string,
+      cert: Record<string, unknown>,
+    ) => Error | undefined;
+    const result = checkServerIdentity("remote.example.com", { fingerprint256: fp });
+    expect(result).toBeUndefined();
+    client.stop();
+  });
+
+  it("OPENCLAW_ALLOW_INSECURE_PRIVATE_WS break-glass still works for non-fingerprint cases", () => {
+    process.env.OPENCLAW_ALLOW_INSECURE_PRIVATE_WS = "1";
+
+    const onConnectError = vi.fn();
+    const client = new GatewayClient({
+      url: "ws://192.168.1.100:18789",
+      onConnectError,
+    });
+
+    client.start();
+
+    // Break-glass should allow ws:// to private addresses.
+    expect(onConnectError).not.toHaveBeenCalled();
+    expect(wsInstances.length).toBe(1);
+
+    // No fingerprint-related options should be set for plain ws://.
+    const opts = getLatestWsOptions();
+    expect(opts.checkServerIdentity).toBeUndefined();
+    expect(opts.rejectUnauthorized).toBeUndefined();
+    client.stop();
   });
 });

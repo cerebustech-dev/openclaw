@@ -249,15 +249,24 @@ describe("tool-loop-detection", () => {
   });
 
   describe("detectToolCallLoop", () => {
-    it("is disabled by default", () => {
+    it("is enabled by default", () => {
       const state = createState();
+      const params = { path: "/same.txt" };
+      const result = {
+        content: [{ type: "text", text: "same output" }],
+        details: { ok: true },
+      };
 
-      for (let i = 0; i < 20; i += 1) {
-        recordToolCall(state, "read", { path: "/same.txt" }, `default-${i}`);
+      for (let i = 0; i < WARNING_THRESHOLD; i += 1) {
+        recordSuccessfulCall(state, "read", params, result, i);
       }
 
-      const loopResult = detectToolCallLoop(state, "read", { path: "/same.txt" });
-      expect(loopResult.stuck).toBe(false);
+      // Without explicit config, the default should be enabled
+      const loopResult = detectToolCallLoop(state, "read", params);
+      expect(loopResult.stuck).toBe(true);
+      if (loopResult.stuck) {
+        expect(loopResult.level).toBe("warning");
+      }
     });
 
     it("does not flag unique tool calls", () => {

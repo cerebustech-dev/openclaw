@@ -343,10 +343,10 @@ export async function runCronIsolatedAgentTurn(params: {
   // unless explicitly allowed via a dangerous config override.
   const isExternalHook =
     hookExternalContentSource !== undefined || isExternalHookSession(baseSessionKey);
-  const allowUnsafeExternalContent =
-    agentPayload?.allowUnsafeExternalContent === true ||
-    (isGmailHook && params.cfg.hooks?.gmail?.allowUnsafeExternalContent === true);
-  const shouldWrapExternal = isExternalHook && !allowUnsafeExternalContent;
+  const dangerouslyAllowUnsafeExternalContent =
+    agentPayload?.dangerouslyAllowUnsafeExternalContent === true ||
+    (isGmailHook && params.cfg.hooks?.gmail?.dangerouslyAllowUnsafeExternalContent === true);
+  const shouldWrapExternal = isExternalHook && !dangerouslyAllowUnsafeExternalContent;
   let commandBody: string;
 
   if (isExternalHook) {

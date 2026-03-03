@@ -622,7 +622,8 @@ export const FIELD_LABELS: Record<string, string> = {
   "hooks.mappings[].messageTemplate": "Hook Mapping Message Template",
   "hooks.mappings[].textTemplate": "Hook Mapping Text Template",
   "hooks.mappings[].deliver": "Hook Mapping Deliver Reply",
-  "hooks.mappings[].allowUnsafeExternalContent": "Hook Mapping Allow Unsafe External Content",
+  "hooks.mappings[].dangerouslyAllowUnsafeExternalContent":
+    "Hook Mapping Allow Unsafe External Content",
   "hooks.mappings[].channel": "Hook Mapping Delivery Channel",
   "hooks.mappings[].to": "Hook Mapping Delivery Destination",
   "hooks.mappings[].model": "Hook Mapping Model Override",
@@ -641,7 +642,7 @@ export const FIELD_LABELS: Record<string, string> = {
   "hooks.gmail.includeBody": "Gmail Hook Include Body",
   "hooks.gmail.maxBytes": "Gmail Hook Max Body Bytes",
   "hooks.gmail.renewEveryMinutes": "Gmail Hook Renew Interval (min)",
-  "hooks.gmail.allowUnsafeExternalContent": "Gmail Hook Allow Unsafe External Content",
+  "hooks.gmail.dangerouslyAllowUnsafeExternalContent": "Gmail Hook Allow Unsafe External Content",
   "hooks.gmail.serve": "Gmail Hook Local Server",
   "hooks.gmail.serve.bind": "Gmail Hook Server Bind Address",
   "hooks.gmail.serve.port": "Gmail Hook Server Port",

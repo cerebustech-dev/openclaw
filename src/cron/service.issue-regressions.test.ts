@@ -82,12 +82,12 @@ describe("Cron issue regressions", () => {
     });
 
     const patched = await cron.update(unsafeToggle.id, {
-      payload: { kind: "agentTurn", allowUnsafeExternalContent: true },
+      payload: { kind: "agentTurn", dangerouslyAllowUnsafeExternalContent: true },
     });
 
     expect(patched.payload.kind).toBe("agentTurn");
     if (patched.payload.kind === "agentTurn") {
-      expect(patched.payload.allowUnsafeExternalContent).toBe(true);
+      expect(patched.payload.dangerouslyAllowUnsafeExternalContent).toBe(true);
       expect(patched.payload.message).toBe("hi");
     }
 
