@@ -4,6 +4,7 @@ import { fetchRemoteMedia, type FetchLike } from "openclaw/plugin-sdk/media-runt
 import { saveMediaBuffer } from "openclaw/plugin-sdk/media-runtime";
 import { buildMediaPayload } from "openclaw/plugin-sdk/reply-payload";
 import { logVerbose } from "openclaw/plugin-sdk/runtime-env";
+import { assertSafeRegexLiteral } from "openclaw/plugin-sdk/security-runtime";
 import type { SsrFPolicy } from "openclaw/plugin-sdk/ssrf-runtime";
 
 const DISCORD_CDN_HOSTNAMES = [
@@ -543,6 +544,11 @@ function resolveDiscordMentions(text: string, message: Message): string {
   let out = text;
   for (const user of mentions) {
     const label = user.globalName || user.username;
+    try {
+      assertSafeRegexLiteral(user.id, /^\d+$/);
+    } catch {
+      continue;
+    }
     out = out.replace(new RegExp(`<@!?${user.id}>`, "g"), `@${label}`);
   }
   return out;

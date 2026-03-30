@@ -1,3 +1,4 @@
+import { compileSafeRegex, MAX_GLOB_PATTERN_LENGTH } from "../security/safe-regex.js";
 import type { ConfigUiHint, ConfigUiHints } from "./schema.hints.js";
 
 export const CONFIG_TAGS = [
@@ -101,9 +102,12 @@ function normalizeTags(tags: ReadonlyArray<string>): ConfigTag[] {
   return [...out].toSorted((a, b) => TAG_PRIORITY[a] - TAG_PRIORITY[b]);
 }
 
-function patternToRegExp(pattern: string): RegExp {
-  const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, "[^.]+");
-  return new RegExp(`^${escaped}$`, "i");
+function patternToRegExp(pattern: string): RegExp | null {
+  if (pattern.length > MAX_GLOB_PATTERN_LENGTH) {
+    return null;
+  }
+  const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, "[^.]{1,256}");
+  return compileSafeRegex(`^${escaped}$`, "i");
 }
 
 function resolveOverride(path: string): ConfigTag[] | undefined {
@@ -115,7 +119,8 @@ function resolveOverride(path: string): ConfigTag[] | undefined {
     if (!pattern.includes("*")) {
       continue;
     }
-    if (patternToRegExp(pattern).test(path)) {
+    const re = patternToRegExp(pattern);
+    if (re && re.test(path)) {
       return tags;
     }
   }

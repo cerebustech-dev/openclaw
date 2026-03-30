@@ -174,3 +174,53 @@ describe("closeDiscordThreadSessions", () => {
     });
   });
 });
+
+describe("ReDoS resistance", () => {
+  it("handles regex-special threadId safely", async () => {
+    vi.resetModules();
+    ({ closeDiscordThreadSessions } = await import("./thread-session-close.js"));
+    hoisted.updateSessionStore.mockClear();
+    hoisted.resolveStorePath.mockReturnValue("/tmp/openclaw-sessions.json");
+
+    const maliciousThreadId = "(a+)+$";
+    const store = {
+      ["agent:main:discord:channel:normal"]: { updatedAt: 1_000 },
+    };
+    setupStore(store);
+
+    const start = performance.now();
+    const count = await closeDiscordThreadSessions({
+      cfg: {},
+      accountId: "default",
+      threadId: maliciousThreadId,
+    });
+    const elapsed = performance.now() - start;
+
+    // Should either return 0 (invalid threadId rejected) or complete quickly
+    expect(elapsed).toBeLessThan(100);
+    expect(count).toBe(0);
+    // The normal session should not be touched
+    expect(store["agent:main:discord:channel:normal"].updatedAt).toBe(1_000);
+  });
+
+  it("still works with normal thread IDs after validation", async () => {
+    vi.resetModules();
+    ({ closeDiscordThreadSessions } = await import("./thread-session-close.js"));
+    hoisted.updateSessionStore.mockClear();
+    hoisted.resolveStorePath.mockReturnValue("/tmp/openclaw-sessions.json");
+
+    const store = {
+      ["agent:main:discord:channel:thread-123"]: { updatedAt: 5_000 },
+    };
+    setupStore(store);
+
+    const count = await closeDiscordThreadSessions({
+      cfg: {},
+      accountId: "default",
+      threadId: "thread-123",
+    });
+
+    expect(count).toBe(1);
+    expect(store["agent:main:discord:channel:thread-123"].updatedAt).toBe(0);
+  });
+});

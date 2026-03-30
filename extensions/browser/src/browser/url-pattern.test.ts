@@ -24,3 +24,25 @@ describe("browser url pattern matching", () => {
     expect(matchBrowserUrlPattern("   ", "https://example.com")).toBe(false);
   });
 });
+
+describe("ReDoS resistance", () => {
+  it("resists ReDoS on adversarial wildcard pattern", () => {
+    const adversarial = "a" + "x".repeat(50_000);
+    const start = performance.now();
+    const result = matchBrowserUrlPattern("a" + "*b".repeat(15), adversarial);
+    const elapsed = performance.now() - start;
+    expect(elapsed).toBeLessThan(100);
+    expect(result).toBe(false);
+  });
+
+  it("still matches *.example.com patterns", () => {
+    expect(matchBrowserUrlPattern("*.example.com", "foo.example.com")).toBe(true);
+    expect(matchBrowserUrlPattern("*.example.com", "bar.example.com")).toBe(true);
+    expect(matchBrowserUrlPattern("*.example.com", "other.net")).toBe(false);
+  });
+
+  it("still matches https://*.com/* patterns", () => {
+    expect(matchBrowserUrlPattern("https://*.com/*", "https://example.com/path")).toBe(true);
+    expect(matchBrowserUrlPattern("https://*.com/*", "https://other.org/path")).toBe(false);
+  });
+});

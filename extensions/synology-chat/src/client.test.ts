@@ -111,26 +111,6 @@ function installFakeTimerHarness() {
 
 describe("sendMessage", () => {
   installFakeTimerHarness();
-  beforeEach(() => {
-    vi.clearAllMocks();
-    vi.resetModules();
-    vi.useFakeTimers();
-    fakeNowMs += 10_000;
-    vi.setSystemTime(fakeNowMs);
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
-  beforeEach(async () => {
-    ({ sendMessage, sendFileUrl, fetchChatUsers, resolveLegacyWebhookNameToChatUserId } =
-      await import("./client.js"));
-  });
-}
-
-describe("sendMessage", () => {
-  installFakeTimerHarness();
 
   it("returns true on successful send", async () => {
     mockSuccessResponse();

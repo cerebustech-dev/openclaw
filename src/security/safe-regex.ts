@@ -1,3 +1,5 @@
+import { escapeRegExp } from "../utils.js";
+
 type QuantifierRead = {
   consumed: number;
   minRepeat: number;
@@ -358,4 +360,59 @@ export function compileSafeRegexDetailed(source: string, flags = ""): SafeRegexC
 
 export function compileSafeRegex(source: string, flags = ""): RegExp | null {
   return compileSafeRegexDetailed(source, flags).regex;
+}
+
+// ---------------------------------------------------------------------------
+// Bounded glob -> regex builder
+// ---------------------------------------------------------------------------
+
+export const MAX_GLOB_PATTERN_LENGTH = 1024;
+
+export function buildBoundedGlobRegex(
+  pattern: string,
+  opts?: {
+    separator?: string;
+    maxLength?: number;
+    flags?: string;
+  },
+): RegExp | null {
+  const maxLen = opts?.maxLength ?? MAX_GLOB_PATTERN_LENGTH;
+  if (!pattern || pattern.length > maxLen) {
+    return null;
+  }
+
+  // Escape all regex special characters (this also escapes * to \*)
+  let src = escapeRegExp(pattern);
+
+  // Replace escaped double-star (\*\*) BEFORE single-star (\*)
+  src = src.replace(/\\\*\\\*/g, "[\\s\\S]{0,4096}");
+
+  // Replace remaining escaped single-star (\*)
+  if (opts?.separator) {
+    const escapedSep = escapeRegExp(opts.separator);
+    src = src.replace(/\\\*/g, `[^${escapedSep}]{0,256}`);
+  } else {
+    src = src.replace(/\\\*/g, "[\\s\\S]{0,256}");
+  }
+
+  // Anchor
+  src = `^${src}$`;
+
+  // Validate through compileSafeRegex (checks for nested repetition)
+  return compileSafeRegex(src, opts?.flags ?? "");
+}
+
+// ---------------------------------------------------------------------------
+// Safe regex literal assertion
+// ---------------------------------------------------------------------------
+
+export function assertSafeRegexLiteral(value: string, format: RegExp, maxLength?: number): string {
+  const max = maxLength ?? 256;
+  if (value.length > max) {
+    throw new Error(`Value exceeds maximum length of ${max} (got ${value.length})`);
+  }
+  if (!format.test(value)) {
+    throw new Error(`Value does not match required format ${format}`);
+  }
+  return value;
 }

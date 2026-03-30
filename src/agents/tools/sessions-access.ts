@@ -1,5 +1,6 @@
 import type { OpenClawConfig } from "../../config/config.js";
 import { isSubagentSessionKey, resolveAgentIdFromSessionKey } from "../../routing/session-key.js";
+import { buildBoundedGlobRegex } from "../../security/safe-regex.js";
 import {
   listSpawnedSessionKeys,
   resolveInternalSessionKey,
@@ -106,8 +107,10 @@ export function createAgentToAgentPolicy(cfg: OpenClawConfig): AgentToAgentPolic
       if (!raw.includes("*")) {
         return raw === agentId;
       }
-      const escaped = raw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      const re = new RegExp(`^${escaped.replaceAll("\\*", ".*")}$`, "i");
+      const re = buildBoundedGlobRegex(raw, { flags: "i" });
+      if (!re) {
+        return false;
+      } // fail closed
       return re.test(agentId);
     });
   };

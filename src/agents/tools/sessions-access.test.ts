@@ -174,3 +174,50 @@ describe("createSessionVisibilityGuard", () => {
     });
   });
 });
+
+describe("createAgentToAgentPolicy ReDoS resistance", () => {
+  it("resists ReDoS on adversarial allow pattern", () => {
+    const policy = createAgentToAgentPolicy({
+      tools: {
+        agentToAgent: {
+          enabled: true,
+          allow: ["a" + "*b".repeat(15)],
+        },
+      },
+    } as unknown as OpenClawConfig);
+
+    const adversarial = "a" + "x".repeat(50_000);
+    const start = performance.now();
+    const result = policy.matchesAllow(adversarial);
+    const elapsed = performance.now() - start;
+    expect(elapsed).toBeLessThan(100);
+    expect(result).toBe(false);
+  });
+
+  it("backward compat: agent:* matches agent:foo", () => {
+    const policy = createAgentToAgentPolicy({
+      tools: {
+        agentToAgent: {
+          enabled: true,
+          allow: ["agent:*"],
+        },
+      },
+    } as unknown as OpenClawConfig);
+
+    expect(policy.matchesAllow("agent:foo")).toBe(true);
+    expect(policy.matchesAllow("other:bar")).toBe(false);
+  });
+
+  it("backward compat: * matches everything", () => {
+    const policy = createAgentToAgentPolicy({
+      tools: {
+        agentToAgent: {
+          enabled: true,
+          allow: ["*"],
+        },
+      },
+    } as unknown as OpenClawConfig);
+
+    expect(policy.matchesAllow("anything")).toBe(true);
+  });
+});

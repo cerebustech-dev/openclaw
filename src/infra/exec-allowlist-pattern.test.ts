@@ -59,3 +59,27 @@ describe("matchesExecAllowlistPattern", () => {
     );
   });
 });
+
+describe("matchesExecAllowlistPattern ReDoS resistance", () => {
+  it("resists ReDoS on pattern with many ** segments", () => {
+    const pattern = "/tmp" + "/**/a".repeat(10);
+    const adversarial = "/tmp" + "/x".repeat(50_000);
+    const start = performance.now();
+    const result = matchesExecAllowlistPattern(pattern, adversarial);
+    const elapsed = performance.now() - start;
+    expect(elapsed).toBeLessThan(100);
+    expect(result).toBe(false);
+  });
+
+  it("backward compat: src/**/*.ts matches deeply nested ts file", () => {
+    expect(matchesExecAllowlistPattern("src/**/*.ts", "src/foo/bar/baz.ts")).toBe(true);
+  });
+
+  it("backward compat: bin/* matches bin/run", () => {
+    expect(matchesExecAllowlistPattern("bin/*", "bin/run")).toBe(true);
+  });
+
+  it("backward compat: bin/* does not match nested path", () => {
+    expect(matchesExecAllowlistPattern("bin/*", "bin/sub/run")).toBe(false);
+  });
+});

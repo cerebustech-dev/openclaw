@@ -38,7 +38,7 @@ function compileGlobRegex(pattern: string): RegExp {
     if (ch === "*") {
       const next = pattern[i + 1];
       if (next === "*") {
-        regex += ".*";
+        regex += "[\\s\\S]{0,4096}"; // bounded double-star
         i += 2;
         continue;
       }

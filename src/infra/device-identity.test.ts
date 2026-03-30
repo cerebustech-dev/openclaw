@@ -1,5 +1,5 @@
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { withTempDir } from "../test-utils/temp-dir.js";
 import {
   deriveDeviceIdFromPublicKey,
@@ -57,9 +57,10 @@ describe("device identity crypto helpers", () => {
       expect(verifyDeviceSignature("%%%invalid%%%", payload, signature)).toBe(false);
       expect(verifyDeviceSignature(identity.publicKeyPem, payload, "%%%invalid%%%")).toBe(false);
     });
+  });
+});
 
 import fs from "node:fs";
-import { describe, expect, it, vi } from "vitest";
 
 vi.mock("node:fs", async () => {
   const actual = await vi.importActual<typeof import("node:fs")>("node:fs");
@@ -86,5 +87,6 @@ describe("device identity directory permissions", () => {
     expect(fs.mkdirSync).toHaveBeenCalledWith(
       "/tmp/test-openclaw-state/identity",
       expect.objectContaining({ recursive: true, mode: 0o700 }),
-    );  });
+    );
+  });
 });

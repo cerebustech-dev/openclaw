@@ -1,12 +1,9 @@
+import { buildBoundedGlobRegex } from "../security/safe-regex.js";
+
 export type CompiledGlobPattern =
   | { kind: "all" }
   | { kind: "exact"; value: string }
   | { kind: "regex"; value: RegExp };
-
-function escapeRegex(value: string) {
-  // Standard "escape string for regex literal" pattern.
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
 
 export function compileGlobPattern(params: {
   raw: string;
@@ -22,10 +19,11 @@ export function compileGlobPattern(params: {
   if (!normalized.includes("*")) {
     return { kind: "exact", value: normalized };
   }
-  return {
-    kind: "regex",
-    value: new RegExp(`^${escapeRegex(normalized).replaceAll("\\*", ".*")}$`),
-  };
+  const regex = buildBoundedGlobRegex(normalized);
+  if (!regex) {
+    return { kind: "exact", value: normalized }; // fallback to exact match
+  }
+  return { kind: "regex", value: regex };
 }
 
 export function compileGlobPatterns(params: {

@@ -410,7 +410,7 @@ describe("runCronIsolatedAgentTurn", () => {
         cfgOverrides: {
           hooks: {
             gmail: {
-              allowUnsafeExternalContent: true,
+              dangerouslyAllowUnsafeExternalContent: true,
             },
           },
         },

@@ -1,3 +1,5 @@
+import { buildBoundedGlobRegex } from "openclaw/plugin-sdk/security-runtime";
+
 export function matchBrowserUrlPattern(pattern: string, url: string): boolean {
   const trimmedPattern = pattern.trim();
   if (!trimmedPattern) {
@@ -7,8 +9,8 @@ export function matchBrowserUrlPattern(pattern: string, url: string): boolean {
     return true;
   }
   if (trimmedPattern.includes("*")) {
-    const escaped = trimmedPattern.replace(/[|\\{}()[\]^$+?.]/g, "\\$&");
-    const regex = new RegExp(`^${escaped.replace(/\*\*/g, ".*").replace(/\*/g, ".*")}$`);
+    const regex = buildBoundedGlobRegex(trimmedPattern);
+    if (!regex) return false;
     return regex.test(url);
   }
   return url.includes(trimmedPattern);
