@@ -1,3 +1,4 @@
+import { assertSafeEvalCode } from "openclaw/plugin-sdk/security-runtime";
 import type { BrowserActRequest, BrowserFormField } from "./client-actions-core.js";
 import { DEFAULT_FILL_FIELD_TYPE } from "./form-fields.js";
 import { DEFAULT_UPLOAD_DIR, resolveStrictExistingPathsWithinRoot } from "./paths.js";
@@ -298,6 +299,7 @@ export async function evaluateViaPlaywright(opts: {
   if (!fnText) {
     throw new Error("function is required");
   }
+  assertSafeEvalCode(fnText);
   const page = await getRestoredPageForTarget(opts);
   // Clamp evaluate timeout to prevent permanently blocking Playwright's command queue.
   // Without this, a long-running async evaluate blocks all subsequent page operations
@@ -350,21 +352,91 @@ export async function evaluateViaPlaywright(opts: {
   try {
     if (opts.ref) {
       const locator = refLocator(page, opts.ref);
-      // eslint-disable-next-line @typescript-eslint/no-implied-eval -- required for browser-context eval
+      // eslint-disable-next-line @typescript-eslint/no-implied-eval -- sandboxed browser-context eval
       const elementEvaluator = new Function(
         "el",
         "args",
         `
         "use strict";
         var fnBody = args.fnBody, timeoutMs = args.timeoutMs;
+
+        // --- Layer 1: Runtime sandbox via global shadowing ---
+        // Capture builtins before shadowing; new Function() scopes to global,
+        // so the inner function cannot access these captured references.
+        var _F = Function;
+        var _ST = setTimeout;
+        var _P = Promise;
+        var _Pr = Proxy;
+
+        // Safe document proxy: blocks cookie, domain, defaultView access
+        var _safeDoc = new _Pr(document, {
+          get: function(target, prop) {
+            if (prop === "cookie" || prop === "domain" || prop === "defaultView") {
+              throw new Error("Access to document." + String(prop) + " is blocked in eval context");
+            }
+            var val = target[prop];
+            return typeof val === "function" ? val.bind(target) : val;
+          },
+          set: function(target, prop, value) {
+            if (prop === "cookie" || prop === "domain") {
+              throw new Error("Setting document." + String(prop) + " is blocked in eval context");
+            }
+            target[prop] = value;
+            return true;
+          }
+        });
+
+        // Safe element proxy: intercepts ownerDocument to return safe doc proxy
+        var _safeEl = el ? new _Pr(el, {
+          get: function(target, prop) {
+            if (prop === "ownerDocument") return _safeDoc;
+            var val = target[prop];
+            return typeof val === "function" ? val.bind(target) : val;
+          }
+        }) : undefined;
+
+        // Safe setTimeout wrapper: only accepts function args (blocks string eval)
+        function _safeTimeout(fn, ms) {
+          if (typeof fn !== "function") {
+            throw new Error("setTimeout with string argument is blocked in eval context");
+          }
+          return _ST(fn, ms);
+        }
+
+        // Create sandboxed function with dangerous globals shadowed via parameters.
+        // new Function() creates scope at GLOBAL level — fnBody cannot access
+        // _F, _ST, _P, _Pr, _safeDoc, _safeEl, or _safeTimeout.
+        var _sandboxedFn = _F(
+          "fetch", "XMLHttpRequest", "WebSocket", "EventSource", "Image",
+          "Worker", "SharedWorker", "importScripts",
+          "eval", "Function", "Proxy", "Reflect",
+          "window", "self", "globalThis", "top", "parent", "frames",
+          "location",
+          "setTimeout", "setInterval",
+          "MutationObserver", "IntersectionObserver",
+          "document", "navigator",
+          "el", "__safeSetTimeout__",
+          '"use strict"; return (' + fnBody + ')'
+        );
+
         try {
-          var candidate = eval("(" + fnBody + ")");
-          var result = typeof candidate === "function" ? candidate(el) : candidate;
+          var candidate = _sandboxedFn(
+            undefined, undefined, undefined, undefined, undefined,
+            undefined, undefined, undefined,
+            undefined, undefined, undefined, undefined,
+            undefined, undefined, undefined, undefined, undefined, undefined,
+            undefined,
+            undefined, undefined,
+            undefined, undefined,
+            _safeDoc, undefined,
+            _safeEl, _safeTimeout
+          );
+          var result = typeof candidate === "function" ? candidate(_safeEl) : candidate;
           if (result && typeof result.then === "function") {
-            return Promise.race([
+            return _P.race([
               result,
-              new Promise(function(_, reject) {
-                setTimeout(function() { reject(new Error("evaluate timed out after " + timeoutMs + "ms")); }, timeoutMs);
+              new _P(function(_, reject) {
+                _ST(function() { reject(new Error("evaluate timed out after " + timeoutMs + "ms")); }, timeoutMs);
               })
             ]);
           }
@@ -381,20 +453,74 @@ export async function evaluateViaPlaywright(opts: {
       return await awaitEvalWithAbort(evalPromise, abortPromise);
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-implied-eval -- required for browser-context eval
+    // eslint-disable-next-line @typescript-eslint/no-implied-eval -- sandboxed browser-context eval
     const browserEvaluator = new Function(
       "args",
       `
         "use strict";
         var fnBody = args.fnBody, timeoutMs = args.timeoutMs;
+
+        // --- Layer 1: Runtime sandbox via global shadowing ---
+        var _F = Function;
+        var _ST = setTimeout;
+        var _P = Promise;
+        var _Pr = Proxy;
+
+        var _safeDoc = new _Pr(document, {
+          get: function(target, prop) {
+            if (prop === "cookie" || prop === "domain" || prop === "defaultView") {
+              throw new Error("Access to document." + String(prop) + " is blocked in eval context");
+            }
+            var val = target[prop];
+            return typeof val === "function" ? val.bind(target) : val;
+          },
+          set: function(target, prop, value) {
+            if (prop === "cookie" || prop === "domain") {
+              throw new Error("Setting document." + String(prop) + " is blocked in eval context");
+            }
+            target[prop] = value;
+            return true;
+          }
+        });
+
+        function _safeTimeout(fn, ms) {
+          if (typeof fn !== "function") {
+            throw new Error("setTimeout with string argument is blocked in eval context");
+          }
+          return _ST(fn, ms);
+        }
+
+        var _sandboxedFn = _F(
+          "fetch", "XMLHttpRequest", "WebSocket", "EventSource", "Image",
+          "Worker", "SharedWorker", "importScripts",
+          "eval", "Function", "Proxy", "Reflect",
+          "window", "self", "globalThis", "top", "parent", "frames",
+          "location",
+          "setTimeout", "setInterval",
+          "MutationObserver", "IntersectionObserver",
+          "document", "navigator",
+          "__safeSetTimeout__",
+          '"use strict"; return (' + fnBody + ')'
+        );
+
         try {
-          var candidate = eval("(" + fnBody + ")");
+          var candidate = _sandboxedFn(
+            undefined, undefined, undefined, undefined, undefined,
+            undefined, undefined, undefined,
+            undefined, undefined, undefined, undefined,
+            undefined, undefined, undefined, undefined, undefined, undefined,
+            undefined,
+            undefined, undefined,
+            undefined, undefined,
+            _safeDoc, undefined,
+            _safeTimeout
+          );
           var result = typeof candidate === "function" ? candidate() : candidate;
           if (result && typeof result.then === "function") {
-            return Promise.race([
+            return _P.race([
               result,
-              new Promise(function(_, reject) {
-                setTimeout(function() { reject(new Error("evaluate timed out after " + timeoutMs + "ms")); }, timeoutMs);
+              new _P(function(_, reject) {
+                _ST(function() { reject(new Error("evaluate timed out after " + timeoutMs + "ms")); }, timeoutMs);
               })
             ]);
           }
@@ -487,6 +613,7 @@ export async function waitForViaPlaywright(opts: {
   if (opts.fn) {
     const fn = String(opts.fn).trim();
     if (fn) {
+      assertSafeEvalCode(fn);
       await page.waitForFunction(fn, { timeout });
     }
   }
