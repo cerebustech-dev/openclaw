@@ -238,7 +238,8 @@ export function mapSensitivePaths(
 
   if (currentSchema instanceof z.ZodObject) {
     const shape = currentSchema.shape;
-    for (const key in shape) {
+    // SECURITY: Object.keys() prevents prototype pollution from injecting traversal targets
+    for (const key of Object.keys(shape)) {
       const nextPath = path ? `${path}.${key}` : key;
       next = mapSensitivePaths(shape[key], nextPath, next);
     }

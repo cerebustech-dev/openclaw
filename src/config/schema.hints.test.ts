@@ -183,3 +183,24 @@ describe("mapSensitivePaths", () => {
     expect(hints["nested.verificationToken"]?.sensitive).toBe(true);
   });
 });
+
+describe("prototype pollution resilience", () => {
+  it("mapSensitivePaths does not traverse Object.prototype pollution", () => {
+    // Pollute Object.prototype with a Zod schema marked sensitive,
+    // simulating an attacker injecting a traversable key.
+    const poison = z.string().register(sensitive);
+    // @ts-expect-error -- intentional prototype pollution for testing
+    Object.prototype.__polluted__ = poison;
+    try {
+      const schema = z.object({ apiKey: z.string().register(sensitive) });
+      const result = mapSensitivePaths(schema, "", {});
+      // The polluted key must NOT appear as an own property in the result
+      expect(Object.hasOwn(result, "__polluted__")).toBe(false);
+      // The legitimate key must still be processed correctly
+      expect(result["apiKey"]?.sensitive).toBe(true);
+    } finally {
+      // @ts-expect-error -- cleanup
+      delete Object.prototype.__polluted__;
+    }
+  });
+});

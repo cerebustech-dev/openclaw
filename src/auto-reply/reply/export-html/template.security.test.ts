@@ -319,3 +319,182 @@ describe("export html security hardening", () => {
     expect(img?.getAttribute("src")).toBe(dataImage);
   });
 });
+
+// ============================================================
+// Link protocol sanitization tests
+// ============================================================
+
+function makeSession(entries: SessionEntry[]): SessionData {
+  return {
+    header: { id: `test-${Date.now()}`, timestamp: now() },
+    entries,
+    leafId: entries[entries.length - 1].id,
+    systemPrompt: "",
+    tools: [],
+  };
+}
+
+function userTextEntry(id: string, parentId: string | null, text: string): SessionEntry {
+  return {
+    id,
+    parentId,
+    timestamp: now(),
+    type: "message",
+    message: { role: "user", content: text },
+  };
+}
+
+function assistantTextEntry(id: string, parentId: string | null, text: string): SessionEntry {
+  return {
+    id,
+    parentId: parentId ?? null,
+    timestamp: now(),
+    type: "message",
+    message: {
+      role: "assistant",
+      content: [{ type: "text", text }],
+    },
+  };
+}
+
+describe("link protocol sanitization", () => {
+  const dangerousLinks = [
+    { name: "javascript: protocol", md: "[click](javascript:alert(1))" },
+    { name: "JAVASCRIPT: uppercase", md: "[click](JAVASCRIPT:alert(1))" },
+    { name: "jAvAsCrIpT: mixed case", md: "[click](jAvAsCrIpT:alert(1))" },
+    { name: "vbscript: protocol", md: "[click](vbscript:MsgBox(1))" },
+    { name: "data:text/html", md: "[click](data:text/html,<script>alert(1)</script>)" },
+    { name: "data:text/html;base64", md: "[click](data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==)" },
+    { name: "data:image/svg+xml (SVG XSS)", md: "[click](data:image/svg+xml,<svg onload=alert(1)>)" },
+    { name: "data:application/xhtml+xml", md: "[click](data:application/xhtml+xml,<html>)" },
+    { name: "percent-encoded javascript: (full)", md: "[click](%6A%61%76%61%73%63%72%69%70%74:alert(1))" },
+    { name: "percent-encoded javascript: (partial)", md: "[click](java%73cript:alert(1))" },
+    { name: "autolink javascript:", md: "<javascript:alert(1)>" },
+    { name: "reference-style javascript:", md: "[click][1]\n\n[1]: javascript:alert(1)" },
+  ];
+
+  it.each(dangerousLinks)(
+    "blocks $name in assistant markdown",
+    ({ md }) => {
+      const session = makeSession([
+        assistantTextEntry("1", null, md),
+      ]);
+      const { document } = renderTemplate(session);
+      const messages = document.getElementById("messages");
+      const anchors = messages?.querySelectorAll("a") ?? [];
+      for (const a of anchors) {
+        const href = (a.getAttribute("href") || "").toLowerCase().replace(/[\s\t\n\r]/g, "");
+        expect(href).not.toMatch(/^javascript:/);
+        expect(href).not.toMatch(/^vbscript:/);
+        expect(href).not.toMatch(/^data:/);
+        expect(href).not.toMatch(/^%6a/i);
+      }
+    },
+  );
+
+  it("allows safe https: links", () => {
+    const session = makeSession([
+      assistantTextEntry("1", null, "[OpenClaw](https://openclaw.example.com)"),
+    ]);
+    const { document } = renderTemplate(session);
+    const link = document.querySelector("#messages a");
+    expect(link).toBeTruthy();
+    expect(link?.getAttribute("href")).toBe("https://openclaw.example.com");
+  });
+
+  it("allows safe http: links", () => {
+    const session = makeSession([
+      assistantTextEntry("1", null, "[local](http://localhost:3000)"),
+    ]);
+    const { document } = renderTemplate(session);
+    const link = document.querySelector("#messages a");
+    expect(link?.getAttribute("href")).toBe("http://localhost:3000");
+  });
+
+  it("allows mailto: links", () => {
+    const session = makeSession([
+      assistantTextEntry("1", null, "[email](mailto:user@example.com)"),
+    ]);
+    const { document } = renderTemplate(session);
+    const link = document.querySelector("#messages a");
+    expect(link?.getAttribute("href")).toBe("mailto:user@example.com");
+  });
+
+  it("allows fragment links", () => {
+    const session = makeSession([
+      assistantTextEntry("1", null, "[section](#heading)"),
+    ]);
+    const { document } = renderTemplate(session);
+    const link = document.querySelector("#messages a");
+    expect(link?.getAttribute("href")).toBe("#heading");
+  });
+});
+
+describe("link protocol sanitization — cross-surface", () => {
+  it("blocks javascript: links in user markdown", () => {
+    const session = makeSession([
+      userTextEntry("1", null, "[trap](javascript:document.cookie)"),
+    ]);
+    const { document } = renderTemplate(session);
+    const anchors = document.querySelectorAll("#messages a");
+    for (const a of anchors) {
+      const href = (a.getAttribute("href") || "").toLowerCase();
+      expect(href).not.toMatch(/^javascript:/);
+    }
+  });
+
+  it("blocks javascript: links in branch_summary", () => {
+    const session: SessionData = {
+      header: { id: "s-link-branch", timestamp: now() },
+      entries: [
+        {
+          id: "1",
+          parentId: null,
+          timestamp: now(),
+          type: "message",
+          message: { role: "user", content: "ok" },
+        },
+        {
+          id: "2",
+          parentId: "1",
+          timestamp: now(),
+          type: "branch_summary",
+          summary: "[exploit](javascript:alert(document.domain))",
+        },
+      ],
+      leafId: "2",
+      systemPrompt: "",
+      tools: [],
+    };
+    const { document } = renderTemplate(session);
+    const anchors = document.querySelectorAll("#messages a");
+    for (const a of anchors) {
+      expect((a.getAttribute("href") || "").toLowerCase()).not.toMatch(/^javascript:/);
+    }
+  });
+});
+
+describe("defense-in-depth innerHTML meta-tests", () => {
+  it("no script tags survive in rendered messages", () => {
+    const session = makeSession([
+      assistantTextEntry("1", null, "normal content with [link](https://example.com)"),
+    ]);
+    const { document } = renderTemplate(session);
+    const scripts = document.querySelectorAll("#messages script");
+    expect(scripts.length).toBe(0);
+  });
+
+  it("no event handler attributes survive in rendered messages", () => {
+    const session = makeSession([
+      assistantTextEntry("1", null, "normal content"),
+    ]);
+    const { document } = renderTemplate(session);
+    const all = document.querySelectorAll("#messages *");
+    for (const el of all) {
+      const attrs = el.getAttributeNames?.() ?? [];
+      for (const attr of attrs) {
+        expect(attr.toLowerCase()).not.toMatch(/^on[a-z]/);
+      }
+    }
+  });
+});

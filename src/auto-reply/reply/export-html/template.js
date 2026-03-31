@@ -1723,6 +1723,39 @@
     return trimmed || "image";
   }
 
+  // ---- Link URL sanitization ----
+  const DANGEROUS_LINK_PROTOCOL_RE = /^(?:javascript|vbscript|data):/i;
+
+  /**
+   * Sanitize a URL for use in <a href="...">.
+   * Blocks javascript:, vbscript:, and all data: protocols.
+   * Performs iterative percent-decoding and HTML entity decoding
+   * to prevent obfuscation bypasses.
+   * @returns the original href if safe, or "" if dangerous
+   */
+  function sanitizeLinkUrl(href) {
+    if (typeof href !== "string") return "";
+    // Step 1: HTML entity decode
+    const temp = document.createElement("textarea");
+    temp.innerHTML = href;
+    let normalized = temp.value;
+    // Step 2: URL percent decode -- iterative to defeat double-encoding
+    try {
+      let prev;
+      do {
+        prev = normalized;
+        normalized = decodeURIComponent(normalized);
+      } while (normalized !== prev);
+    } catch {
+      // malformed percent sequences -- keep the last successful decode
+    }
+    // Step 3: Strip control chars, whitespace, and Unicode zero-width characters
+    normalized = normalized.replace(/[\x00-\x20\x7f\u200b-\u200f\u2028-\u2029\ufeff]/g, "");
+    // Step 4: Check protocol against blocklist
+    if (DANGEROUS_LINK_PROTOCOL_RE.test(normalized)) return "";
+    return href;
+  }
+
   function renderMarkdownImage(token) {
     const label = normalizeMarkdownImageLabel(token?.text);
     const href = typeof token?.href === "string" ? token.href.trim() : "";
@@ -1773,10 +1806,19 @@
       image(token) {
         return renderMarkdownImage(token);
       },
+      link(token) {
+        const href = sanitizeLinkUrl(token.href);
+        const title = token.title ? ` title="${escapeHtmlAttr(token.title)}"` : "";
+        const text = this.parser.parseInline(token.tokens);
+        if (!href) return text;
+        return `<a href="${escapeHtmlAttr(href)}"${title}>${text}</a>`;
+      },
     },
   });
 
-  // Simple marked parse (escaping handled in renderers)
+  // Simple marked parse -- XSS protection is handled by the custom renderer
+  // pipeline above: text, html, codespan, code, image, and link renderers
+  // all sanitize or escape their content.
   function safeMarkedParse(text) {
     return marked.parse(text);
   }
