@@ -1,0 +1,117 @@
+name: Upstream Auto-Rebase
+
+on:
+  schedule:
+    - cron: "0 12 * * 1" # Weekly Monday noon UTC
+  workflow_dispatch:
+    inputs:
+      upstream_tag:
+        description: "Specific upstream tag to rebase onto (e.g. v2026.4.1). Leave empty for latest."
+        required: false
+        type: string
+
+jobs:
+  auto-rebase:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+    steps:
+      - name: Checkout fork
+        uses: actions/checkout@v4
+        with:
+          ref: security/audit-remediation
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Fetch upstream and determine target tag
+        id: upstream
+        run: |
+          set -euo pipefail
+          git remote add upstream https://github.com/openclaw/openclaw.git || true
+          git fetch upstream --tags
+
+          if [ -n "${{ inputs.upstream_tag }}" ]; then
+            TARGET_TAG="${{ inputs.upstream_tag }}"
+          else
+            TARGET_TAG=$(git tag -l 'v*' --sort=-version:refname | head -1)
+          fi
+
+          # Detect current base from commit history
+          CURRENT_BASE=$(git log --oneline security/audit-remediation | grep "^[a-f0-9]* build: cut" | head -1 | sed 's/.*cut \(.*\) stable.*/\1/' || echo "unknown")
+
+          echo "target_tag=$TARGET_TAG" >> "$GITHUB_OUTPUT"
+          echo "current_base=$CURRENT_BASE" >> "$GITHUB_OUTPUT"
+
+          if git merge-base --is-ancestor "$TARGET_TAG" security/audit-remediation 2>/dev/null; then
+            echo "already_current=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "already_current=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Skip if already current
+        if: steps.upstream.outputs.already_current == 'true'
+        run: echo "Branch already includes ${{ steps.upstream.outputs.target_tag }}, nothing to do."
+
+      - name: Attempt rebase
+        if: steps.upstream.outputs.already_current == 'false'
+        id: rebase
+        run: |
+          set -euo pipefail
+          TARGET="${{ steps.upstream.outputs.target_tag }}"
+
+          if git rebase "$TARGET"; then
+            echo "rebase_status=clean" >> "$GITHUB_OUTPUT"
+          else
+            git rebase --abort
+            echo "rebase_status=conflicts" >> "$GITHUB_OUTPUT"
+            # Re-run to capture conflict details
+            CONFLICTS=$(git rebase "$TARGET" 2>&1 | grep "CONFLICT" || true)
+            git rebase --abort 2>/dev/null || true
+            echo "conflict_files<<EOF" >> "$GITHUB_OUTPUT"
+            echo "$CONFLICTS" >> "$GITHUB_OUTPUT"
+            echo "EOF" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Push rebased branch
+        if: steps.rebase.outputs.rebase_status == 'clean'
+        run: git push --force-with-lease origin security/audit-remediation
+
+      - name: Open issue on conflict
+        if: steps.rebase.outputs.rebase_status == 'conflicts'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const target = '${{ steps.upstream.outputs.target_tag }}';
+            const base = '${{ steps.upstream.outputs.current_base }}';
+            const conflicts = `${{ steps.rebase.outputs.conflict_files }}`;
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Rebase conflicts: security/audit-remediation onto ${target}`,
+              body: [
+                `## Upstream Update Available`,
+                ``,
+                `Attempted to rebase \`security/audit-remediation\` from \`${base}\` onto \`${target}\` but hit conflicts.`,
+                ``,
+                `### Conflicting files`,
+                '```',
+                conflicts || 'Could not capture conflict details',
+                '```',
+                ``,
+                `### Manual resolution`,
+                '```bash',
+                `git fetch upstream --tags`,
+                `git checkout security/audit-remediation`,
+                `git rebase ${target}`,
+                `# resolve conflicts, then:`,
+                `git push --force-with-lease origin security/audit-remediation`,
+                '```',
+              ].join('\n'),
+              labels: ['upstream-sync', 'manual-intervention']
+            });
