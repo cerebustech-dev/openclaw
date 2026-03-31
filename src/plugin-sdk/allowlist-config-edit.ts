@@ -2,7 +2,7 @@ import type { ConfigWriteTarget } from "../channels/plugins/config-writes.js";
 import type { ChannelAllowlistAdapter } from "../channels/plugins/types.adapters.js";
 import type { ChannelId } from "../channels/plugins/types.js";
 import type { OpenClawConfig } from "../config/config.js";
-import { isBlockedObjectKey } from "../infra/prototype-keys.js";
+import { assertSafePathSegments, isBlockedObjectKey } from "../infra/prototype-keys.js";
 import { DEFAULT_ACCOUNT_ID, normalizeAccountId } from "../routing/session-key.js";
 
 type AllowlistConfigPaths = {
@@ -200,6 +200,7 @@ function resolveAccountScopedWriteTarget(
 }
 
 function getNestedValue(root: Record<string, unknown>, path: string[]): unknown {
+  assertSafePathSegments(path);
   let current: unknown = root;
   for (const key of path) {
     if (!current || typeof current !== "object") {
@@ -214,6 +215,7 @@ function ensureNestedObject(
   root: Record<string, unknown>,
   path: string[],
 ): Record<string, unknown> {
+  assertSafePathSegments(path);
   let current = root;
   for (const key of path) {
     const existing = current[key];
@@ -226,6 +228,7 @@ function ensureNestedObject(
 }
 
 function setNestedValue(root: Record<string, unknown>, path: string[], value: unknown) {
+  assertSafePathSegments(path);
   if (path.length === 0) {
     return;
   }
@@ -238,6 +241,7 @@ function setNestedValue(root: Record<string, unknown>, path: string[], value: un
 }
 
 function deleteNestedValue(root: Record<string, unknown>, path: string[]) {
+  assertSafePathSegments(path);
   if (path.length === 0) {
     return;
   }

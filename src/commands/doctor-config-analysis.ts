@@ -51,7 +51,7 @@ export function resolveConfigPathTarget(root: unknown, path: Array<string | numb
       return null;
     }
     const record = current as Record<string, unknown>;
-    if (!(part in record)) {
+    if (!Object.hasOwn(record, part)) {
       return null;
     }
     current = record[part];

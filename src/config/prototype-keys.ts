@@ -1,1 +1,1 @@
-export { isBlockedObjectKey } from "../infra/prototype-keys.js";
+export { assertSafeObjectKey, assertSafePathSegments, isBlockedObjectKey } from "../infra/prototype-keys.js";

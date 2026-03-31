@@ -84,7 +84,11 @@ function readNestedValue(value: unknown, keys: Array<string | number>): unknown 
     if (!isRecord(current)) {
       return undefined;
     }
-    current = current[key as keyof typeof current];
+    const record = current as Record<string, unknown>;
+    if (typeof key === "string" && !Object.hasOwn(record, key)) {
+      return undefined;
+    }
+    current = record[key as string];
   }
   return current;
 }

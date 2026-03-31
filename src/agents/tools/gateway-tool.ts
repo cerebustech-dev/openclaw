@@ -69,7 +69,11 @@ function getValueAtPath(config: Record<string, unknown>, path: string): unknown 
     if (!current || typeof current !== "object" || Array.isArray(current)) {
       return undefined;
     }
-    current = (current as Record<string, unknown>)[part];
+    const record = current as Record<string, unknown>;
+    if (!Object.hasOwn(record, part)) {
+      return undefined;
+    }
+    current = record[part];
   }
   return current;
 }

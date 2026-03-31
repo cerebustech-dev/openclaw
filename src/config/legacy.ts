@@ -8,7 +8,11 @@ function getPathValue(root: Record<string, unknown>, path: string[]): unknown {
     if (!cursor || typeof cursor !== "object") {
       return undefined;
     }
-    cursor = (cursor as Record<string, unknown>)[key];
+    const record = cursor as Record<string, unknown>;
+    if (!Object.hasOwn(record, key)) {
+      return undefined;
+    }
+    cursor = record[key];
   }
   return cursor;
 }

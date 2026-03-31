@@ -1,4 +1,5 @@
 import { isDeepStrictEqual } from "node:util";
+import { assertSafePathSegments } from "../infra/prototype-keys.js";
 import type { OpenClawConfig } from "../config/config.js";
 import { isRecord } from "./shared.js";
 
@@ -68,6 +69,7 @@ function traverseToLeafParent(params: {
 }
 
 export function getPath(root: unknown, segments: string[]): unknown {
+  assertSafePathSegments(segments);
   if (segments.length === 0) {
     return undefined;
   }
@@ -93,6 +95,7 @@ export function setPathCreateStrict(
   segments: string[],
   value: unknown,
 ): boolean {
+  assertSafePathSegments(segments);
   if (segments.length === 0) {
     throw new Error("Target path is empty.");
   }
@@ -157,6 +160,7 @@ export function setPathExistingStrict(
   segments: string[],
   value: unknown,
 ): boolean {
+  assertSafePathSegments(segments);
   const cursor = traverseToLeafParent({ root, segments, requireExistingSegment: true });
 
   const leaf = segments[segments.length - 1] ?? "";
@@ -185,6 +189,7 @@ export function setPathExistingStrict(
 }
 
 export function deletePathStrict(root: OpenClawConfig, segments: string[]): boolean {
+  assertSafePathSegments(segments);
   const cursor = traverseToLeafParent({ root, segments, requireExistingSegment: false });
 
   const leaf = segments[segments.length - 1] ?? "";

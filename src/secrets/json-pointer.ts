@@ -1,3 +1,5 @@
+import { assertSafePathSegments } from "../infra/prototype-keys.js";
+
 function failOrUndefined(params: { onMissing: "throw" | "undefined"; message: string }): undefined {
   if (params.onMissing === "throw") {
     throw new Error(params.message);
@@ -31,6 +33,8 @@ export function readJsonPointer(
     .slice(1)
     .split("/")
     .map((token) => decodeJsonPointerToken(token));
+
+  assertSafePathSegments(tokens);
 
   let current: unknown = root;
   for (const token of tokens) {
@@ -76,6 +80,8 @@ export function setJsonPointer(
     .slice(1)
     .split("/")
     .map((token) => decodeJsonPointerToken(token));
+
+  assertSafePathSegments(tokens);
 
   let current: Record<string, unknown> = root;
   for (let index = 0; index < tokens.length; index += 1) {

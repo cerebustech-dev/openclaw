@@ -30,7 +30,14 @@ function safeWriteJson(filePath: string, data: Record<string, unknown>) {
   fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
 }
 
+const BLOCKED_PROTO_KEYS = new Set(["__proto__", "prototype", "constructor"]);
+
 function setDeep(obj: Record<string, unknown>, keys: string[], value: unknown) {
+  for (const k of keys) {
+    if (BLOCKED_PROTO_KEYS.has(k)) {
+      throw new Error(`Blocked path segment: "${k}"`);
+    }
+  }
   let node: Record<string, unknown> = obj;
   for (const key of keys.slice(0, -1)) {
     const next = node[key];

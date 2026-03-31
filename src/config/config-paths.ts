@@ -1,5 +1,5 @@
 import { isPlainObject } from "../utils.js";
-import { isBlockedObjectKey } from "./prototype-keys.js";
+import { assertSafePathSegments, isBlockedObjectKey } from "./prototype-keys.js";
 
 type PathNode = Record<string, unknown>;
 
@@ -29,6 +29,7 @@ export function parseConfigPath(raw: string): {
 }
 
 export function setConfigValueAtPath(root: PathNode, path: string[], value: unknown): void {
+  assertSafePathSegments(path);
   let cursor: PathNode = root;
   for (let idx = 0; idx < path.length - 1; idx += 1) {
     const key = path[idx];
@@ -42,6 +43,7 @@ export function setConfigValueAtPath(root: PathNode, path: string[], value: unkn
 }
 
 export function unsetConfigValueAtPath(root: PathNode, path: string[]): boolean {
+  assertSafePathSegments(path);
   const stack: Array<{ node: PathNode; key: string }> = [];
   let cursor: PathNode = root;
   for (let idx = 0; idx < path.length - 1; idx += 1) {
@@ -71,6 +73,7 @@ export function unsetConfigValueAtPath(root: PathNode, path: string[]): boolean 
 }
 
 export function getConfigValueAtPath(root: PathNode, path: string[]): unknown {
+  assertSafePathSegments(path);
   let cursor: unknown = root;
   for (const key of path) {
     if (!isPlainObject(cursor)) {

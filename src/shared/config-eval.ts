@@ -24,7 +24,11 @@ export function resolveConfigPath(config: unknown, pathStr: string): unknown {
     if (typeof current !== "object" || current === null) {
       return undefined;
     }
-    current = (current as Record<string, unknown>)[part];
+    const record = current as Record<string, unknown>;
+    if (!Object.hasOwn(record, part)) {
+      return undefined;
+    }
+    current = record[part];
   }
   return current;
 }

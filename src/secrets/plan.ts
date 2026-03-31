@@ -1,6 +1,7 @@
 import type { SecretProviderConfig, SecretRef } from "../config/types.secrets.js";
 import { SecretProviderSchema } from "../config/zod-schema.core.js";
 import { isValidExecSecretRefId, isValidSecretProviderAlias } from "./ref-contract.js";
+import { isBlockedObjectKey } from "../infra/prototype-keys.js";
 import { parseDotPath, toDotPath } from "./shared.js";
 import {
   isKnownSecretTargetType,
@@ -60,7 +61,7 @@ export type SecretsApplyPlan = {
   };
 };
 
-const FORBIDDEN_PATH_SEGMENTS = new Set(["__proto__", "prototype", "constructor"]);
+// Consolidated: uses isBlockedObjectKey from ../infra/prototype-keys.js
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -71,7 +72,7 @@ function isSecretProviderConfigShape(value: unknown): value is SecretProviderCon
 }
 
 function hasForbiddenPathSegment(segments: string[]): boolean {
-  return segments.some((segment) => FORBIDDEN_PATH_SEGMENTS.has(segment));
+  return segments.some((segment) => isBlockedObjectKey(segment));
 }
 
 export function resolveValidatedPlanTarget(candidate: {

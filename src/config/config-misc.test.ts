@@ -521,3 +521,48 @@ describe("config strict validation", () => {
     });
   });
 });
+
+describe("config path prototype pollution guards", () => {
+  it("setConfigValueAtPath throws on __proto__ segment", () => {
+    expect(() => setConfigValueAtPath({}, ["__proto__", "polluted"], true)).toThrow(
+      "Blocked path segment",
+    );
+  });
+
+  it("setConfigValueAtPath throws on constructor segment", () => {
+    expect(() => setConfigValueAtPath({}, ["constructor"], true)).toThrow("Blocked path segment");
+  });
+
+  it("unsetConfigValueAtPath throws on __proto__ segment", () => {
+    expect(() => unsetConfigValueAtPath({}, ["__proto__"])).toThrow("Blocked path segment");
+  });
+
+  it("unsetConfigValueAtPath throws on prototype segment", () => {
+    expect(() => unsetConfigValueAtPath({}, ["prototype"])).toThrow("Blocked path segment");
+  });
+
+  it("getConfigValueAtPath throws on __proto__ segment", () => {
+    expect(() => getConfigValueAtPath({}, ["__proto__"])).toThrow("Blocked path segment");
+  });
+
+  it("getConfigValueAtPath throws on constructor segment", () => {
+    expect(() => getConfigValueAtPath({}, ["constructor"])).toThrow("Blocked path segment");
+  });
+
+  it("Object.prototype is not polluted after attempted write", () => {
+    try {
+      setConfigValueAtPath({}, ["__proto__", "polluted"], "EXPLOIT");
+    } catch {
+      // expected
+    }
+    expect((({}) as Record<string, unknown>).polluted).toBeUndefined();
+  });
+
+  it("normal set/get/unset operations still work", () => {
+    const root: Record<string, unknown> = {};
+    setConfigValueAtPath(root, ["gateway", "port"], 19001);
+    expect(getConfigValueAtPath(root, ["gateway", "port"])).toBe(19001);
+    expect(unsetConfigValueAtPath(root, ["gateway", "port"])).toBe(true);
+    expect(getConfigValueAtPath(root, ["gateway", "port"])).toBeUndefined();
+  });
+});

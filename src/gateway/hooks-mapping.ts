@@ -3,6 +3,7 @@ import path from "node:path";
 import { CONFIG_PATH, type HookMappingConfig, type HooksConfig } from "../config/config.js";
 import { importFileModule, resolveFunctionModuleExport } from "../hooks/module-loader.js";
 import type { HookMessageChannel } from "./hooks.js";
+import { isBlockedObjectKey } from "../infra/prototype-keys.js";
 
 export type HookMappingResolved = {
   id: string;
@@ -485,7 +486,7 @@ function resolveTemplateExpr(expr: string, ctx: HookMappingContext) {
 // Block traversal into prototype-chain properties on attacker-controlled
 // webhook payloads.  Mirrors the same blocklist used by config-paths.ts
 // for config path traversal.
-const BLOCKED_PATH_KEYS = new Set(["__proto__", "prototype", "constructor"]);
+// Consolidated: uses isBlockedObjectKey from ../infra/prototype-keys.js
 
 function getByPath(input: Record<string, unknown>, pathExpr: string): unknown {
   if (!pathExpr) {
@@ -514,7 +515,7 @@ function getByPath(input: Record<string, unknown>, pathExpr: string): unknown {
       current = current[part] as unknown;
       continue;
     }
-    if (BLOCKED_PATH_KEYS.has(part)) {
+    if (isBlockedObjectKey(part)) {
       return undefined;
     }
     if (typeof current !== "object") {
