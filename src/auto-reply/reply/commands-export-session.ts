@@ -35,6 +35,7 @@ function generateHtml(sessionData: SessionData): string {
   const templateJs = loadTemplate("template.js");
   const markedJs = loadTemplate(path.join("vendor", "marked.min.js"));
   const hljsJs = loadTemplate(path.join("vendor", "highlight.min.js"));
+  const dompurifyJs = loadTemplate(path.join("vendor", "purify.min.js"));
 
   // Use pi-mono dark theme colors (matching their theme/dark.json)
   const themeVars = `
@@ -94,6 +95,7 @@ function generateHtml(sessionData: SessionData): string {
     .replace("{{CSS}}", css)
     .replace("{{JS}}", templateJs)
     .replace("{{SESSION_DATA}}", sessionDataBase64)
+    .replace("{{DOMPURIFY_JS}}", dompurifyJs)
     .replace("{{MARKED_JS}}", markedJs)
     .replace("{{HIGHLIGHT_JS}}", hljsJs);
 }

@@ -838,6 +838,7 @@
 
         const content = document.createElement("span");
         content.className = "tree-content";
+        // nosemgrep: insecure-document-method — getTreeNodeDisplayHtml uses escapeHtml for all dynamic content
         content.innerHTML = getTreeNodeDisplayHtml(entry, flatNode.node.label);
 
         div.appendChild(prefixSpan);
@@ -1299,6 +1300,7 @@
       button.innerHTML = "✓";
       button.classList.add("copied");
       setTimeout(() => {
+        // nosemgrep: insecure-document-method — restoring button own innerHTML after copy feedback
         button.innerHTML = originalHtml;
         button.classList.remove("copied");
       }, 1500);
@@ -1643,6 +1645,7 @@
     }
 
     const template = document.createElement("template");
+    // nosemgrep: insecure-document-method — html from renderEntry uses DOMPurify-wrapped safeMarkedParse
     template.innerHTML = html;
     const node = template.content.firstElementChild;
 
@@ -1660,6 +1663,7 @@
 
     renderTree();
 
+    // nosemgrep: insecure-document-method — renderHeader uses escapeHtml for all dynamic values
     document.getElementById("header-container").innerHTML = renderHeader();
 
     // Build messages using cached DOM nodes
@@ -1737,6 +1741,7 @@
     if (typeof href !== "string") return "";
     // Step 1: HTML entity decode
     const temp = document.createElement("textarea");
+    // nosemgrep: insecure-document-method — HTML entity decoding step in sanitizeLinkUrl, output is protocol-checked
     temp.innerHTML = href;
     let normalized = temp.value;
     // Step 2: URL percent decode -- iterative to defeat double-encoding
@@ -1816,11 +1821,23 @@
     },
   });
 
-  // Simple marked parse -- XSS protection is handled by the custom renderer
-  // pipeline above: text, html, codespan, code, image, and link renderers
-  // all sanitize or escape their content.
+  // DOMPurify sanitization config — defense-in-depth layer on top of the
+  // custom marked renderers above. Allowlist covers all standard markdown output.
+  const PURIFY_CONFIG = {
+    ALLOWED_TAGS: ["p", "br", "strong", "em", "code", "pre", "ul", "ol", "li",
+                   "h1", "h2", "h3", "h4", "h5", "h6", "a", "img", "blockquote",
+                   "table", "thead", "tbody", "tr", "th", "td", "span", "div",
+                   "hr", "del", "sup", "sub", "details", "summary"],
+    ALLOWED_ATTR: ["href", "src", "alt", "title", "class", "id", "target",
+                   "rel", "width", "height", "colspan", "rowspan"],
+    ALLOW_DATA_ATTR: false,
+  };
+
+  // Sanitized marked parse — the custom renderer pipeline (text, html, codespan,
+  // code, image, link) provides first-layer escaping. DOMPurify adds defense-in-depth
+  // to catch any vectors the renderers might miss.
   function safeMarkedParse(text) {
-    return marked.parse(text);
+    return DOMPurify.sanitize(marked.parse(text), PURIFY_CONFIG);
   }
 
   // Search input

@@ -69,6 +69,13 @@ function renderTemplate(sessionData: SessionData) {
   runtime.globalThis = runtime;
 
   vm.createContext(runtime);
+  // DOMPurify mock — template.js now requires DOMPurify in scope.
+  // Real DOMPurify does not work with linkedom; a pass-through mock is sufficient
+  // here because this test suite validates the custom marked renderers, not DOMPurify.
+  vm.runInContext(
+    'window.DOMPurify = { sanitize: function(h) { return h; }, version: "3.3.3" };',
+    runtime,
+  );
   vm.runInContext(markedJs, runtime);
   vm.runInContext(highlightJs, runtime);
   vm.runInContext(templateJs, runtime);
