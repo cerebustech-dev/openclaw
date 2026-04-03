@@ -34,6 +34,11 @@ function resolveFolder(input: string): string | { error: string } {
 // ── Schema ──────────────────────────────────────────────────────────────────
 
 export const EmailListSchema = Type.Object({
+  account: Type.Optional(
+    Type.String({
+      description: "Account to use. Defaults based on tool type.",
+    }),
+  ),
   folder: Type.Optional(
     Type.String({
       description:
@@ -103,7 +108,10 @@ function formatMessageSummary(msg: GraphMessage) {
 const SELECT_FIELDS =
   "id,subject,from,toRecipients,receivedDateTime,isRead,hasAttachments,bodyPreview,importance,flag";
 
-export function createEmailListTool(deps: { graphClient: GraphClient }) {
+export function createEmailListTool(deps: {
+  graphClient: GraphClient;
+  resolveClient?: (toolName: string, accountId?: string) => GraphClient;
+}) {
   return {
     name: "email_list",
     label: "List Emails",
@@ -115,6 +123,7 @@ export function createEmailListTool(deps: { graphClient: GraphClient }) {
       args: unknown,
     ) {
       const p = args as Record<string, unknown>;
+      const account = typeof p.account === "string" ? p.account.trim() : undefined;
       const folderInput = (typeof p.folder === "string" ? p.folder.trim() : "") || "Inbox";
       const top = Math.min(Math.max(Number(p.top) || 10, 1), 50);
       const filter = typeof p.filter === "string" ? p.filter.trim() : undefined;
@@ -142,6 +151,8 @@ export function createEmailListTool(deps: { graphClient: GraphClient }) {
       }
 
       try {
+        const client = deps.resolveClient?.("email_list", account) ?? deps.graphClient;
+
         const query: Record<string, string> = {
           $top: String(top),
           $select: SELECT_FIELDS,
@@ -169,7 +180,7 @@ export function createEmailListTool(deps: { graphClient: GraphClient }) {
             ? "/me/messages"
             : `/me/mailFolders/${encodeURIComponent(folder)}/messages`;
 
-        const data = await deps.graphClient.fetchJson<GraphListResponse>(
+        const data = await client.fetchJson<GraphListResponse>(
           basePath,
           query,
           extraHeaders,

@@ -51,6 +51,7 @@ export function buildAuthorizeUrl(
   config: Office365Config,
   challenge: string,
   state: string,
+  loginHint?: string,
 ): string {
   const redirectUri = config.redirectUri || REDIRECT_URI;
   const qs = new URLSearchParams({
@@ -63,6 +64,9 @@ export function buildAuthorizeUrl(
     code_challenge_method: "S256",
     prompt: "consent",
   });
+  if (loginHint) {
+    qs.set("login_hint", loginHint);
+  }
   return `${authorizeUrl(config.tenantId)}?${qs.toString()}`;
 }
 

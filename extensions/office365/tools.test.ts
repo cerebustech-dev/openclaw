@@ -844,3 +844,177 @@ describe("email_reply", () => {
     expect(parsed.error.message).not.toContain("graph.microsoft.com");
   });
 });
+
+// ── Phase 3: Multi-account routing + policy enforcement ───────────────────
+
+describe("multi-account tool routing", () => {
+  let rodClient: ReturnType<typeof createMockGraphClient>;
+  let openclawClient: ReturnType<typeof createMockGraphClient>;
+
+  function makeResolveClient(
+    clients: Map<string, GraphClient>,
+    policy: Map<string, string[]>, // toolName → permitted account IDs
+  ) {
+    return (toolName: string, accountId?: string): GraphClient => {
+      const targetId = accountId ?? "rod"; // default
+      if (!clients.has(targetId)) {
+        throw new GraphApiError(
+          `Unknown account '${targetId}'. Available accounts: ${[...clients.keys()].join(", ")}.`,
+          "user_input",
+          400,
+        );
+      }
+      const permitted = policy.get(toolName);
+      if (permitted && !permitted.includes(targetId)) {
+        throw new GraphApiError(
+          `Tool ${toolName} is not permitted for account '${targetId}'. Allowed accounts: [${permitted.map((a) => `'${a}'`).join(", ")}].`,
+          "user_input",
+          403,
+        );
+      }
+      return clients.get(targetId)!;
+    };
+  }
+
+  beforeEach(() => {
+    rodClient = createMockGraphClient();
+    openclawClient = createMockGraphClient();
+  });
+
+  it("email_list uses resolveClient when provided", async () => {
+    rodClient._fetchJsonMock.mockResolvedValue({ value: [], "@odata.count": 0 });
+
+    const clients = new Map<string, GraphClient>([["rod", rodClient], ["openclaw", openclawClient]]);
+    const policy = new Map([["email_list", ["rod"]], ["email_send", ["openclaw"]]]);
+    const tool = createEmailListTool({
+      graphClient: rodClient,
+      resolveClient: makeResolveClient(clients, policy),
+    });
+
+    await tool.execute("id", {});
+
+    expect(rodClient._fetchJsonMock).toHaveBeenCalled();
+    expect(openclawClient._fetchJsonMock).not.toHaveBeenCalled();
+  });
+
+  it("email_send uses resolveClient to route to openclaw", async () => {
+    openclawClient._fetchMock.mockResolvedValue(new Response("", { status: 202 }));
+
+    const clients = new Map<string, GraphClient>([["rod", rodClient], ["openclaw", openclawClient]]);
+    const policy = new Map([["email_list", ["rod"]], ["email_send", ["openclaw"]]]);
+    const tool = createEmailSendTool({
+      graphClient: rodClient,
+      resolveClient: makeResolveClient(clients, policy),
+    });
+
+    await tool.execute("id", {
+      to: "test@example.com",
+      subject: "Test",
+      body: "<p>Hi</p>",
+      account: "openclaw",
+    });
+
+    expect(openclawClient._fetchMock).toHaveBeenCalled();
+    expect(rodClient._fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("policy denial: email_send with account=rod is blocked", async () => {
+    const clients = new Map<string, GraphClient>([["rod", rodClient], ["openclaw", openclawClient]]);
+    const policy = new Map([["email_send", ["openclaw"]]]);
+    const tool = createEmailSendTool({
+      graphClient: rodClient,
+      resolveClient: makeResolveClient(clients, policy),
+    });
+
+    const result = await tool.execute("id", {
+      to: "test@example.com",
+      subject: "Test",
+      body: "<p>Hi</p>",
+      account: "rod",
+    });
+    const parsed = parseResult(result);
+
+    expect(parsed.error).toBeDefined();
+    expect(parsed.error.category).toBe("user_input");
+    expect(parsed.error.message).toContain("not permitted");
+    expect(parsed.error.message).toContain("openclaw");
+  });
+
+  it("policy denial: unknown account returns actionable error", async () => {
+    const clients = new Map<string, GraphClient>([["rod", rodClient], ["openclaw", openclawClient]]);
+    const policy = new Map([["email_list", ["rod"]]]);
+    const tool = createEmailListTool({
+      graphClient: rodClient,
+      resolveClient: makeResolveClient(clients, policy),
+    });
+
+    const result = await tool.execute("id", { account: "nonexistent" });
+    const parsed = parseResult(result);
+
+    expect(parsed.error).toBeDefined();
+    expect(parsed.error.category).toBe("user_input");
+    expect(parsed.error.message).toContain("Unknown account");
+    expect(parsed.error.message).toContain("rod");
+    expect(parsed.error.message).toContain("openclaw");
+  });
+
+  it("email_read uses resolveClient with explicit account override", async () => {
+    openclawClient._fetchJsonMock.mockResolvedValue({
+      id: "msg-1",
+      hasAttachments: false,
+      body: { contentType: "text", content: "Body" },
+    });
+
+    const clients = new Map<string, GraphClient>([["rod", rodClient], ["openclaw", openclawClient]]);
+    const policy = new Map([["email_read", ["rod", "openclaw"]]]); // permitted for both
+    const tool = createEmailReadTool({
+      graphClient: rodClient,
+      resolveClient: makeResolveClient(clients, policy),
+    });
+
+    await tool.execute("id", { messageId: "msg-1", account: "openclaw" });
+
+    expect(openclawClient._fetchJsonMock).toHaveBeenCalled();
+    expect(rodClient._fetchJsonMock).not.toHaveBeenCalled();
+  });
+
+  it("email_reply uses resolveClient", async () => {
+    openclawClient._fetchMock.mockResolvedValue(new Response("", { status: 202 }));
+
+    const clients = new Map<string, GraphClient>([["rod", rodClient], ["openclaw", openclawClient]]);
+    const policy = new Map([["email_reply", ["openclaw"]]]);
+    const tool = createEmailReplyTool({
+      graphClient: rodClient,
+      resolveClient: makeResolveClient(clients, policy),
+    });
+
+    await tool.execute("id", {
+      messageId: "msg-1",
+      body: "<p>Thanks</p>",
+      account: "openclaw",
+    });
+
+    expect(openclawClient._fetchMock).toHaveBeenCalled();
+    expect(rodClient._fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("legacy fallback: tools use deps.graphClient when resolveClient is absent", async () => {
+    rodClient._fetchJsonMock.mockResolvedValue({ value: [], "@odata.count": 0 });
+
+    const tool = createEmailListTool({ graphClient: rodClient });
+
+    await tool.execute("id", {});
+
+    expect(rodClient._fetchJsonMock).toHaveBeenCalled();
+  });
+
+  it("account param is ignored gracefully when resolveClient is absent", async () => {
+    rodClient._fetchJsonMock.mockResolvedValue({ value: [], "@odata.count": 0 });
+
+    const tool = createEmailListTool({ graphClient: rodClient });
+
+    await tool.execute("id", { account: "openclaw" });
+
+    expect(rodClient._fetchJsonMock).toHaveBeenCalled();
+  });
+});

@@ -88,10 +88,31 @@ export type Office365Credential = {
 
 // ── Plugin config ───────────────────────────────────────────────────────────
 
+export type Office365AccountConfig = {
+  name?: string;
+  email?: string;
+  scopes?: string[];
+  tools?: string[];
+  clientId?: string;
+  tenantId?: string;
+  clientSecret?: string;
+  redirectUri?: string;
+};
+
 export type Office365Config = {
   clientId: string;
   tenantId: string;
   clientSecret: string;
   redirectUri: string;
   scopes: string[];
+  defaultAccount?: string;
+  accounts?: Record<string, Office365AccountConfig>;
+};
+
+export type ResolvedOffice365Account = {
+  accountId: string;
+  name: string;
+  email?: string;
+  config: Office365Config;
+  tools: string[];
 };

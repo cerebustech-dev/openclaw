@@ -5,6 +5,7 @@ import { fetchWithSsrFGuard } from "openclaw/plugin-sdk";
 import type { PluginLogger } from "openclaw/plugin-sdk";
 import { GraphApiError, type GraphErrorCategory, type Office365Config, type Office365Credential } from "./types.js";
 import { refreshMicrosoftTokens } from "./oauth.js";
+import { ACCOUNT_ID_RE } from "./accounts.js";
 
 // ── Constants ───────────────────────────────────────────────────────────────
 
@@ -24,8 +25,11 @@ export type GraphClient = {
 
 // ── Credential persistence ──────────────────────────────────────────────────
 
-function credentialPath(stateDir: string): string {
-  return join(stateDir, "office365-credentials.json");
+function credentialPath(stateDir: string, accountId = "default"): string {
+  if (accountId === "default") {
+    return join(stateDir, "office365-credentials.json");
+  }
+  return join(stateDir, `office365-credentials-${accountId}.json`);
 }
 
 function writeCredentialFile(path: string, cred: Office365Credential, logger?: PluginLogger): void {
@@ -105,9 +109,18 @@ export function createGraphClient(params: {
   config: Office365Config;
   stateDir: string;
   logger: PluginLogger;
+  accountId?: string;
 }): GraphClient {
-  const { config, logger } = params;
-  const credPath = credentialPath(params.stateDir);
+  const { config, logger, accountId } = params;
+
+  // Validate accountId before using it in file paths
+  if (accountId && accountId !== "default" && !ACCOUNT_ID_RE.test(accountId)) {
+    throw new Error(
+      `Invalid account ID '${accountId}'. Must match ${ACCOUNT_ID_RE} (lowercase alphanumeric, hyphens, underscores).`,
+    );
+  }
+
+  const credPath = credentialPath(params.stateDir, accountId);
 
   let cached: { access: string; expires: number } | null = null;
   let refreshInFlight: Promise<string> | null = null;

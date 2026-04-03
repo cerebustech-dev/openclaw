@@ -254,3 +254,106 @@ describe("readCredentialFile validates types (Issue 14)", () => {
     expect(client).toBeDefined();
   });
 });
+
+// ── Phase 2: credentialPath with accountId ────────────────────────────────
+
+describe("credentialPath with accountId", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("uses original filename for default accountId", () => {
+    const client = createGraphClient({
+      config: TEST_CONFIG,
+      stateDir: "/tmp/test-state",
+      logger: makeLogger(),
+    });
+
+    client.setCredential(TEST_CRED);
+
+    // writeFileSync should write to the original path (no account suffix)
+    const writeCall = fsMock.writeFileSync.mock.calls[0];
+    const writtenPath = writeCall[0] as string;
+    expect(writtenPath).toMatch(/office365-credentials\.json\./);
+    expect(writtenPath).not.toContain("office365-credentials-");
+  });
+
+  it("uses original filename when accountId is omitted", () => {
+    const client = createGraphClient({
+      config: TEST_CONFIG,
+      stateDir: "/tmp/test-state",
+      logger: makeLogger(),
+    });
+
+    client.setCredential(TEST_CRED);
+
+    const writeCall = fsMock.writeFileSync.mock.calls[0];
+    const writtenPath = writeCall[0] as string;
+    expect(writtenPath).toMatch(/office365-credentials\.json\./);
+    expect(writtenPath).not.toContain("office365-credentials-");
+  });
+
+  it("uses account-specific filename for non-default accountId", () => {
+    const client = createGraphClient({
+      config: TEST_CONFIG,
+      stateDir: "/tmp/test-state",
+      logger: makeLogger(),
+      accountId: "rod",
+    });
+
+    client.setCredential(TEST_CRED);
+
+    const writeCall = fsMock.writeFileSync.mock.calls[0];
+    const writtenPath = writeCall[0] as string;
+    expect(writtenPath).toMatch(/office365-credentials-rod\.json\./);
+  });
+
+  it("uses account-specific filename for openclaw accountId", () => {
+    const client = createGraphClient({
+      config: TEST_CONFIG,
+      stateDir: "/tmp/test-state",
+      logger: makeLogger(),
+      accountId: "openclaw",
+    });
+
+    client.setCredential(TEST_CRED);
+
+    const writeCall = fsMock.writeFileSync.mock.calls[0];
+    const writtenPath = writeCall[0] as string;
+    expect(writtenPath).toMatch(/office365-credentials-openclaw\.json\./);
+  });
+
+  it("reads from account-specific credential file", async () => {
+    fsMock.readFileSync.mockReturnValue(JSON.stringify(TEST_CRED));
+
+    const { fetchWithSsrFGuard } = await import("openclaw/plugin-sdk");
+    (fetchWithSsrFGuard as ReturnType<typeof vi.fn>).mockResolvedValue({
+      response: new Response(JSON.stringify({ id: "123" }), { status: 200 }),
+      release: vi.fn(),
+    });
+
+    const client = createGraphClient({
+      config: TEST_CONFIG,
+      stateDir: "/tmp/test-state",
+      logger: makeLogger(),
+      accountId: "rod",
+    });
+
+    await client.fetchJson("/me");
+
+    // readFileSync should be called with the account-specific path
+    const readCall = fsMock.readFileSync.mock.calls[0];
+    expect(readCall[0]).toContain("office365-credentials-rod.json");
+  });
+
+  it("rejects accountId that fails ACCOUNT_ID_RE validation", () => {
+    expect(() =>
+      createGraphClient({
+        config: TEST_CONFIG,
+        stateDir: "/tmp/test-state",
+        logger: makeLogger(),
+        accountId: "../evil",
+      }),
+    ).toThrow(/invalid account ID/i);
+  });
+});

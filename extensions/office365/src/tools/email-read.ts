@@ -11,6 +11,11 @@ const MAX_ATTACHMENTS = 25;
 // ── Schema ──────────────────────────────────────────────────────────────────
 
 export const EmailReadSchema = Type.Object({
+  account: Type.Optional(
+    Type.String({
+      description: "Account to use. Defaults based on tool type.",
+    }),
+  ),
   messageId: Type.String({
     description: "The ID of the email message to read (from email_list results).",
   }),
@@ -62,7 +67,10 @@ function truncateBody(content: string): { text: string; truncated: boolean } {
 
 // ── Tool factory ────────────────────────────────────────────────────────────
 
-export function createEmailReadTool(deps: { graphClient: GraphClient }) {
+export function createEmailReadTool(deps: {
+  graphClient: GraphClient;
+  resolveClient?: (toolName: string, accountId?: string) => GraphClient;
+}) {
   return {
     name: "email_read",
     label: "Read Email",
@@ -74,6 +82,7 @@ export function createEmailReadTool(deps: { graphClient: GraphClient }) {
       args: unknown,
     ) {
       const p = args as Record<string, unknown>;
+      const account = typeof p.account === "string" ? p.account.trim() : undefined;
       const messageId = typeof p.messageId === "string" ? p.messageId.trim() : "";
       const bodyFormat = p.bodyFormat === "html" ? "html" : "text";
       const markAsRead = p.markAsRead === true;
@@ -88,6 +97,7 @@ export function createEmailReadTool(deps: { graphClient: GraphClient }) {
       }
 
       try {
+        const client = deps.resolveClient?.("email_read", account) ?? deps.graphClient;
         const encodedId = encodeURIComponent(messageId);
 
         // Fetch the message
@@ -96,7 +106,7 @@ export function createEmailReadTool(deps: { graphClient: GraphClient }) {
           extraHeaders["Prefer"] = `outlook.body-content-type="${bodyFormat}"`;
         }
 
-        const msg = await deps.graphClient.fetchJson<GraphMessage>(
+        const msg = await client.fetchJson<GraphMessage>(
           `/me/messages/${encodedId}`,
           { $select: SELECT_FIELDS },
           extraHeaders,
@@ -105,7 +115,7 @@ export function createEmailReadTool(deps: { graphClient: GraphClient }) {
         // Fetch attachment metadata if present (excludes inline, max 25)
         let attachments: AttachmentMeta[] | undefined;
         if (msg.hasAttachments) {
-          const attachData = await deps.graphClient.fetchJson<{
+          const attachData = await client.fetchJson<{
             value: AttachmentMeta[];
           }>(
             `/me/messages/${encodedId}/attachments`,
@@ -120,7 +130,7 @@ export function createEmailReadTool(deps: { graphClient: GraphClient }) {
 
         // Mark as read if requested
         if (markAsRead && !msg.isRead) {
-          await deps.graphClient.fetch(`/me/messages/${encodedId}`, {
+          await client.fetch(`/me/messages/${encodedId}`, {
             method: "PATCH",
             body: JSON.stringify({ isRead: true }),
           });

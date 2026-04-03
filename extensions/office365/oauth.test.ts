@@ -66,6 +66,18 @@ describe("buildAuthorizeUrl", () => {
     expect(parsed.searchParams.get("state")).toBe("test-state");
     expect(parsed.searchParams.get("prompt")).toBe("consent");
   });
+
+  it("includes login_hint when provided", () => {
+    const url = buildAuthorizeUrl(TEST_CONFIG, "challenge", "state", "rod@example.com");
+    const parsed = new URL(url);
+    expect(parsed.searchParams.get("login_hint")).toBe("rod@example.com");
+  });
+
+  it("omits login_hint when not provided", () => {
+    const url = buildAuthorizeUrl(TEST_CONFIG, "challenge", "state");
+    const parsed = new URL(url);
+    expect(parsed.searchParams.get("login_hint")).toBeNull();
+  });
 });
 
 describe("parseCallbackInput", () => {

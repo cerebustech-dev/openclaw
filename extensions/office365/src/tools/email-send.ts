@@ -5,6 +5,11 @@ import { GraphApiError, toolSuccess, toolError } from "../types.js";
 // ── Schema ──────────────────────────────────────────────────────────────────
 
 export const EmailSendSchema = Type.Object({
+  account: Type.Optional(
+    Type.String({
+      description: "Account to use. Defaults based on tool type.",
+    }),
+  ),
   to: Type.Union([
     Type.Array(Type.String(), { minItems: 1 }),
     Type.String(),
@@ -53,7 +58,10 @@ function toRecipients(
 
 // ── Tool factory ────────────────────────────────────────────────────────────
 
-export function createEmailSendTool(deps: { graphClient: GraphClient }) {
+export function createEmailSendTool(deps: {
+  graphClient: GraphClient;
+  resolveClient?: (toolName: string, accountId?: string) => GraphClient;
+}) {
   return {
     name: "email_send",
     label: "Send Email",
@@ -62,6 +70,7 @@ export function createEmailSendTool(deps: { graphClient: GraphClient }) {
     parameters: EmailSendSchema,
     async execute(_toolCallId: string, args: unknown) {
       const p = args as Record<string, unknown>;
+      const account = typeof p.account === "string" ? p.account.trim() : undefined;
 
       // ── Validate required fields ────────────────────────────────────────
       const recipients = toRecipients(p.to);
@@ -118,7 +127,8 @@ export function createEmailSendTool(deps: { graphClient: GraphClient }) {
 
       // ── Send ────────────────────────────────────────────────────────────
       try {
-        await deps.graphClient.fetch("/me/sendMail", {
+        const client = deps.resolveClient?.("email_send", account) ?? deps.graphClient;
+        await client.fetch("/me/sendMail", {
           method: "POST",
           body: JSON.stringify({ message }),
         });

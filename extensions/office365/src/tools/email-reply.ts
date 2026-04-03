@@ -5,6 +5,11 @@ import { GraphApiError, toolSuccess, toolError } from "../types.js";
 // ── Schema ──────────────────────────────────────────────────────────────────
 
 export const EmailReplySchema = Type.Object({
+  account: Type.Optional(
+    Type.String({
+      description: "Account to use. Defaults based on tool type.",
+    }),
+  ),
   messageId: Type.String({
     description: "The ID of the email message to reply to (from email_list or email_read results).",
   }),
@@ -20,7 +25,10 @@ export const EmailReplySchema = Type.Object({
 
 // ── Tool factory ────────────────────────────────────────────────────────────
 
-export function createEmailReplyTool(deps: { graphClient: GraphClient }) {
+export function createEmailReplyTool(deps: {
+  graphClient: GraphClient;
+  resolveClient?: (toolName: string, accountId?: string) => GraphClient;
+}) {
   return {
     name: "email_reply",
     label: "Reply to Email",
@@ -29,6 +37,7 @@ export function createEmailReplyTool(deps: { graphClient: GraphClient }) {
     parameters: EmailReplySchema,
     async execute(_toolCallId: string, args: unknown) {
       const p = args as Record<string, unknown>;
+      const account = typeof p.account === "string" ? p.account.trim() : undefined;
 
       // ── Validate required fields ────────────────────────────────────────
       const messageId = typeof p.messageId === "string" ? p.messageId.trim() : "";
@@ -61,10 +70,11 @@ export function createEmailReplyTool(deps: { graphClient: GraphClient }) {
 
       // ── Send reply ──────────────────────────────────────────────────────
       try {
+        const client = deps.resolveClient?.("email_reply", account) ?? deps.graphClient;
         const encodedId = encodeURIComponent(messageId);
         const action = replyAll ? "replyAll" : "reply";
 
-        await deps.graphClient.fetch(`/me/messages/${encodedId}/${action}`, {
+        await client.fetch(`/me/messages/${encodedId}/${action}`, {
           method: "POST",
           body: JSON.stringify({
             message: {

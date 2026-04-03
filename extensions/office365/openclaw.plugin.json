@@ -11,7 +11,24 @@
       "tenantId": { "type": "string" },
       "clientSecret": { "type": "string" },
       "redirectUri": { "type": "string" },
-      "scopes": { "type": "array", "items": { "type": "string" } }
+      "scopes": { "type": "array", "items": { "type": "string" } },
+      "defaultAccount": { "type": "string" },
+      "accounts": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string" },
+            "email": { "type": "string" },
+            "scopes": { "type": "array", "items": { "type": "string" } },
+            "tools": { "type": "array", "items": { "type": "string" } },
+            "clientId": { "type": "string" },
+            "tenantId": { "type": "string" },
+            "clientSecret": { "type": "string" },
+            "redirectUri": { "type": "string" }
+          }
+        }
+      }
     }
   },
   "uiHints": {
@@ -19,6 +36,8 @@
     "tenantId": { "label": "Azure Tenant ID" },
     "clientSecret": { "label": "Azure Client Secret", "sensitive": true },
     "redirectUri": { "label": "OAuth Redirect URI" },
-    "scopes": { "label": "Graph API Scopes", "advanced": true }
+    "scopes": { "label": "Graph API Scopes", "advanced": true },
+    "defaultAccount": { "label": "Default Account ID", "advanced": true },
+    "accounts": { "label": "Multi-Account Configuration", "advanced": true }
   }
 }
