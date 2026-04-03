@@ -538,6 +538,8 @@ importers:
 
   extensions/ollama: {}
 
+  extensions/office365: {}
+
   extensions/open-prose: {}
 
   extensions/openai: {}

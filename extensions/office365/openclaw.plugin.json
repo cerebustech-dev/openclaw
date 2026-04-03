@@ -1,0 +1,24 @@
+{
+  "id": "office365",
+  "name": "Microsoft 365",
+  "description": "Email and calendar tools via Microsoft Graph API",
+  "providers": ["microsoft-graph"],
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "clientId": { "type": "string" },
+      "tenantId": { "type": "string" },
+      "clientSecret": { "type": "string" },
+      "redirectUri": { "type": "string" },
+      "scopes": { "type": "array", "items": { "type": "string" } }
+    }
+  },
+  "uiHints": {
+    "clientId": { "label": "Azure Client ID" },
+    "tenantId": { "label": "Azure Tenant ID" },
+    "clientSecret": { "label": "Azure Client Secret", "sensitive": true },
+    "redirectUri": { "label": "OAuth Redirect URI" },
+    "scopes": { "label": "Graph API Scopes", "advanced": true }
+  }
+}

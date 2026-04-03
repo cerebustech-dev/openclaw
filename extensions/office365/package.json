@@ -1,0 +1,12 @@
+{
+  "name": "@openclaw/office365",
+  "version": "2026.3.2",
+  "private": true,
+  "description": "Microsoft 365 email and calendar via Graph API",
+  "type": "module",
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}
