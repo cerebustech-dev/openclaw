@@ -13,6 +13,10 @@ import { createEmailReadTool } from "./src/tools/email-read.js";
 import { createEmailSendTool } from "./src/tools/email-send.js";
 import { createEmailReplyTool } from "./src/tools/email-reply.js";
 import { createEmailSearchTool } from "./src/tools/email-search.js";
+import { createCalendarListTool } from "./src/tools/calendar-list.js";
+import { createCalendarCreateTool } from "./src/tools/calendar-create.js";
+import { createCalendarUpdateTool } from "./src/tools/calendar-update.js";
+import { createCalendarDeleteTool } from "./src/tools/calendar-delete.js";
 import { GraphApiError } from "./src/types.js";
 import type { Office365AccountConfig, Office365Config } from "./src/types.js";
 import {
@@ -30,6 +34,7 @@ const PROVIDER_ID = "microsoft-graph";
 const DEFAULT_SCOPES = [
   "Mail.Read",
   "Mail.Send",
+  "Calendars.ReadWrite",
   "User.Read",
   "offline_access",
 ];
@@ -235,6 +240,10 @@ const office365Plugin = {
       api.registerTool(createEmailSendTool(toolDeps));
       api.registerTool(createEmailReplyTool(toolDeps));
       api.registerTool(createEmailSearchTool(toolDeps));
+      api.registerTool(createCalendarListTool(toolDeps));
+      api.registerTool(createCalendarCreateTool(toolDeps));
+      api.registerTool(createCalendarUpdateTool(toolDeps));
+      api.registerTool(createCalendarDeleteTool(toolDeps));
 
       // Multi-account prompt context
       api.on("before_prompt_build", async () => {
@@ -313,7 +322,7 @@ const office365Plugin = {
                   },
                   configPatch: {},
                   notes: [
-                    "Microsoft 365 email tools are now available: email_list, email_read, email_send, email_reply, email_search.",
+                    "Microsoft 365 tools are now available: email_list, email_read, email_send, email_reply, email_search, calendar_list, calendar_create, calendar_update, calendar_delete.",
                   ],
                 });
               } catch (err) {
@@ -348,6 +357,10 @@ const office365Plugin = {
       api.registerTool(createEmailSendTool({ graphClient }));
       api.registerTool(createEmailReplyTool({ graphClient }));
       api.registerTool(createEmailSearchTool({ graphClient }));
+      api.registerTool(createCalendarListTool({ graphClient }));
+      api.registerTool(createCalendarCreateTool({ graphClient }));
+      api.registerTool(createCalendarUpdateTool({ graphClient }));
+      api.registerTool(createCalendarDeleteTool({ graphClient }));
 
       const credentialFile = join(stateDir, "office365-credentials.json");
 
@@ -357,7 +370,7 @@ const office365Plugin = {
         }
         return {
           prependContext:
-            "Microsoft 365 email tools are available: email_list (list/search messages), email_read (read full message by ID), email_send (compose and send new email), email_reply (reply to existing email), email_search (structured search across all folders with date ranges, sender/recipient/subject filters).",
+            "Microsoft 365 tools are available: email_list (list/search messages), email_read (read full message by ID), email_send (compose and send new email), email_reply (reply to existing email), email_search (structured search with date ranges and filters), calendar_list (list/query calendar events with date range support), calendar_create (create new events), calendar_update (update existing events), calendar_delete (delete events by ID).",
         };
       });
     }

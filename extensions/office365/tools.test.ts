@@ -6,6 +6,12 @@ import { createEmailSendTool } from "./src/tools/email-send.js";
 import { createEmailReplyTool } from "./src/tools/email-reply.js";
 import { createEmailSearchTool } from "./src/tools/email-search.js";
 import { GraphApiError } from "./src/types.js";
+import { formatEventSummary, validateDateRange } from "./src/tools/_calendar-shared.js";
+import { createCalendarListTool } from "./src/tools/calendar-list.js";
+import { createCalendarUpdateTool } from "./src/tools/calendar-update.js";
+import { createCalendarDeleteTool } from "./src/tools/calendar-delete.js";
+import { createCalendarCreateTool } from "./src/tools/calendar-create.js";
+import type { GraphEvent } from "./src/types.js";
 
 // ── Mock Graph client ───────────────────────────────────────────────────────
 
@@ -1388,5 +1394,849 @@ describe("multi-account tool routing", () => {
     await tool.execute("id", { account: "openclaw" });
 
     expect(rodClient._fetchJsonMock).toHaveBeenCalled();
+  });
+
+  it("calendar_list routes to rod via resolveClient", async () => {
+    rodClient._fetchJsonMock.mockResolvedValue({ value: [], "@odata.count": 0 });
+
+    const clients = new Map<string, GraphClient>([["rod", rodClient], ["openclaw", openclawClient]]);
+    const policy = new Map([["calendar_list", ["rod"]]]);
+    const tool = createCalendarListTool({
+      graphClient: openclawClient,
+      resolveClient: makeResolveClient(clients, policy),
+    });
+
+    await tool.execute("id", { account: "rod" });
+
+    expect(rodClient._fetchJsonMock).toHaveBeenCalled();
+    expect(openclawClient._fetchJsonMock).not.toHaveBeenCalled();
+  });
+
+  it("calendar_create policy denial for wrong account", async () => {
+    const clients = new Map<string, GraphClient>([["rod", rodClient], ["openclaw", openclawClient]]);
+    const policy = new Map([["calendar_create", ["rod"]]]);
+    const tool = createCalendarCreateTool({
+      graphClient: rodClient,
+      resolveClient: makeResolveClient(clients, policy),
+    });
+
+    const result = parseResult(await tool.execute("id", {
+      account: "openclaw",
+      subject: "Test",
+      startDateTime: "2026-04-05T09:00:00",
+      endDateTime: "2026-04-05T10:00:00",
+    }));
+
+    expect(result.error.category).toBe("user_input");
+    expect(result.error.message).toContain("not permitted");
+  });
+});
+
+// ── formatEventSummary tests ───────────────────────────────────────────────
+
+describe("formatEventSummary", () => {
+  it("formats a full event with all fields", () => {
+    const event: GraphEvent = {
+      id: "evt-1",
+      subject: "Team Standup",
+      bodyPreview: "Daily sync meeting",
+      start: { dateTime: "2026-04-04T09:00:00", timeZone: "America/Detroit" },
+      end: { dateTime: "2026-04-04T09:30:00", timeZone: "America/Detroit" },
+      location: { displayName: "Conference Room A" },
+      organizer: { emailAddress: { name: "Rod", address: "rod@test.com" } },
+      attendees: [
+        {
+          emailAddress: { name: "Alice", address: "alice@test.com" },
+          type: "required",
+          status: { response: "accepted", time: "2026-04-03T12:00:00Z" },
+        },
+      ],
+      isAllDay: false,
+      isCancelled: false,
+      isOnlineMeeting: true,
+      onlineMeetingUrl: "https://teams.microsoft.com/meet/123",
+      importance: "high",
+      showAs: "busy",
+      webLink: "https://outlook.office.com/calendar/item/123",
+    };
+
+    const result = formatEventSummary(event);
+
+    expect(result).toEqual({
+      id: "evt-1",
+      subject: "Team Standup",
+      start: { dateTime: "2026-04-04T09:00:00", timeZone: "America/Detroit" },
+      end: { dateTime: "2026-04-04T09:30:00", timeZone: "America/Detroit" },
+      location: "Conference Room A",
+      organizer: "Rod <rod@test.com>",
+      attendees: [
+        { email: "alice@test.com", name: "Alice", type: "required", response: "accepted" },
+      ],
+      isAllDay: false,
+      isCancelled: false,
+      isOnlineMeeting: true,
+      onlineMeetingUrl: "https://teams.microsoft.com/meet/123",
+      importance: "high",
+      showAs: "busy",
+      bodyPreview: "Daily sync meeting",
+      webLink: "https://outlook.office.com/calendar/item/123",
+    });
+  });
+
+  it("handles missing optional fields with defaults", () => {
+    const event: GraphEvent = { id: "evt-minimal" };
+
+    const result = formatEventSummary(event);
+
+    expect(result.id).toBe("evt-minimal");
+    expect(result.subject).toBe("(no subject)");
+    expect(result.start).toBeNull();
+    expect(result.end).toBeNull();
+    expect(result.location).toBe("");
+    expect(result.organizer).toBe("(unknown)");
+    expect(result.attendees).toEqual([]);
+    expect(result.isAllDay).toBe(false);
+    expect(result.isCancelled).toBe(false);
+    expect(result.isOnlineMeeting).toBe(false);
+    expect(result.onlineMeetingUrl).toBeNull();
+    expect(result.importance).toBe("normal");
+    expect(result.showAs).toBe("busy");
+    expect(result.bodyPreview).toBe("");
+    expect(result.webLink).toBeNull();
+  });
+
+  it("formats multiple attendees with type and response status", () => {
+    const event: GraphEvent = {
+      id: "evt-2",
+      attendees: [
+        {
+          emailAddress: { name: "Alice", address: "alice@test.com" },
+          type: "required",
+          status: { response: "accepted", time: "2026-04-03T12:00:00Z" },
+        },
+        {
+          emailAddress: { address: "bob@test.com" },
+          type: "optional",
+          status: { response: "tentativelyAccepted", time: "2026-04-03T13:00:00Z" },
+        },
+        {
+          emailAddress: { name: "Room 101", address: "room101@test.com" },
+          type: "resource",
+        },
+      ],
+    };
+
+    const result = formatEventSummary(event);
+
+    expect(result.attendees).toEqual([
+      { email: "alice@test.com", name: "Alice", type: "required", response: "accepted" },
+      { email: "bob@test.com", name: "", type: "optional", response: "tentativelyAccepted" },
+      { email: "room101@test.com", name: "Room 101", type: "resource", response: "none" },
+    ]);
+  });
+
+  it("formats organizer with name+email and address-only", () => {
+    const withName: GraphEvent = {
+      id: "evt-3",
+      organizer: { emailAddress: { name: "Rod", address: "rod@test.com" } },
+    };
+    expect(formatEventSummary(withName).organizer).toBe("Rod <rod@test.com>");
+
+    const addressOnly: GraphEvent = {
+      id: "evt-4",
+      organizer: { emailAddress: { address: "rod@test.com" } },
+    };
+    expect(formatEventSummary(addressOnly).organizer).toBe("rod@test.com");
+  });
+
+  it("carries through bodyPreview", () => {
+    const event: GraphEvent = {
+      id: "evt-5",
+      bodyPreview: "Please review the attached proposal before our meeting.",
+    };
+
+    expect(formatEventSummary(event).bodyPreview).toBe(
+      "Please review the attached proposal before our meeting.",
+    );
+  });
+
+  it("formats cancelled event", () => {
+    const event: GraphEvent = {
+      id: "evt-6",
+      subject: "Cancelled Meeting",
+      isCancelled: true,
+    };
+
+    const result = formatEventSummary(event);
+    expect(result.isCancelled).toBe(true);
+    expect(result.subject).toBe("Cancelled Meeting");
+  });
+
+  it("passes through online meeting URL when isOnlineMeeting is true", () => {
+    const event: GraphEvent = {
+      id: "evt-7",
+      isOnlineMeeting: true,
+      onlineMeetingUrl: "https://teams.microsoft.com/meet/456",
+    };
+
+    const result = formatEventSummary(event);
+    expect(result.isOnlineMeeting).toBe(true);
+    expect(result.onlineMeetingUrl).toBe("https://teams.microsoft.com/meet/456");
+  });
+});
+
+// ── validateDateRange tests ────────────────────────────────────────────────
+
+describe("validateDateRange", () => {
+  it("returns null when both dates are missing (no date filter)", () => {
+    expect(validateDateRange(undefined, undefined)).toBeNull();
+  });
+
+  it("returns error when only startDateTime provided", () => {
+    const result = validateDateRange("2026-04-04T09:00:00", undefined);
+    expect(result).not.toBeNull();
+    expect(result!.error).toContain("Both startDateTime and endDateTime");
+    expect(result!.error).toContain("only startDateTime");
+  });
+
+  it("returns error when only endDateTime provided", () => {
+    const result = validateDateRange(undefined, "2026-04-04T17:00:00");
+    expect(result).not.toBeNull();
+    expect(result!.error).toContain("Both startDateTime and endDateTime");
+    expect(result!.error).toContain("only endDateTime");
+  });
+
+  it("returns error for invalid startDateTime", () => {
+    const result = validateDateRange("not-a-date", "2026-04-04T17:00:00");
+    expect(result).not.toBeNull();
+    expect(result!.error).toContain("Invalid startDateTime");
+    expect(result!.error).toContain("ISO 8601");
+  });
+
+  it("returns error for invalid endDateTime", () => {
+    const result = validateDateRange("2026-04-04T09:00:00", "garbage");
+    expect(result).not.toBeNull();
+    expect(result!.error).toContain("Invalid endDateTime");
+  });
+
+  it("returns error when startDateTime >= endDateTime", () => {
+    const result = validateDateRange("2026-04-04T17:00:00", "2026-04-04T09:00:00");
+    expect(result).not.toBeNull();
+    expect(result!.error).toContain("must be before");
+  });
+
+  it("returns error when startDateTime equals endDateTime", () => {
+    const result = validateDateRange("2026-04-04T09:00:00", "2026-04-04T09:00:00");
+    expect(result).not.toBeNull();
+    expect(result!.error).toContain("must be before");
+  });
+
+  it("returns null for valid date range", () => {
+    expect(validateDateRange("2026-04-04T09:00:00", "2026-04-04T17:00:00")).toBeNull();
+  });
+});
+
+// ── calendar_list tests ────────────────────────────────────────────────────
+
+describe("calendar_list", () => {
+  let client: ReturnType<typeof createMockGraphClient>;
+  let tool: ReturnType<typeof createCalendarListTool>;
+
+  const SAMPLE_EVENT: GraphEvent = {
+    id: "evt-1",
+    subject: "Team Standup",
+    bodyPreview: "Daily sync",
+    start: { dateTime: "2026-04-04T09:00:00", timeZone: "America/Detroit" },
+    end: { dateTime: "2026-04-04T09:30:00", timeZone: "America/Detroit" },
+    location: { displayName: "Room A" },
+    organizer: { emailAddress: { name: "Rod", address: "rod@test.com" } },
+    attendees: [],
+    isAllDay: false,
+    importance: "normal",
+    showAs: "busy",
+  };
+
+  beforeEach(() => {
+    client = createMockGraphClient();
+    tool = createCalendarListTool({ graphClient: client });
+  });
+
+  it("with defaults calls /me/events with correct query params", async () => {
+    client._fetchJsonMock.mockResolvedValue({ value: [], "@odata.count": 0 });
+
+    await tool.execute("id", {});
+
+    expect(client._fetchJsonMock).toHaveBeenCalledWith(
+      "/me/events",
+      expect.objectContaining({
+        $top: "10",
+        $orderby: "start/dateTime asc",
+        $count: "true",
+      }),
+      expect.any(Object),
+    );
+  });
+
+  it("default orderBy is start/dateTime asc", async () => {
+    client._fetchJsonMock.mockResolvedValue({ value: [], "@odata.count": 0 });
+
+    await tool.execute("id", {});
+
+    const query = client._fetchJsonMock.mock.calls[0][1];
+    expect(query.$orderby).toBe("start/dateTime asc");
+  });
+
+  it("formats event summaries via formatEventSummary", async () => {
+    client._fetchJsonMock.mockResolvedValue({
+      value: [SAMPLE_EVENT],
+      "@odata.count": 1,
+    });
+
+    const result = parseResult(await tool.execute("id", {}));
+
+    expect(result.data.events).toHaveLength(1);
+    expect(result.data.events[0].id).toBe("evt-1");
+    expect(result.data.events[0].subject).toBe("Team Standup");
+    expect(result.data.events[0].organizer).toBe("Rod <rod@test.com>");
+  });
+
+  it("returns pagination info", async () => {
+    client._fetchJsonMock.mockResolvedValue({
+      value: [SAMPLE_EVENT],
+      "@odata.count": 42,
+      "@odata.nextLink": "https://graph.microsoft.com/v1.0/me/events?$skip=10",
+    });
+
+    const result = parseResult(await tool.execute("id", {}));
+
+    expect(result.data.totalCount).toBe(42);
+    expect(result.data.hasMore).toBe(true);
+    expect(result.data.nextSkip).toBe(10);
+  });
+
+  it("uses /me/calendarView when both startDateTime and endDateTime provided", async () => {
+    client._fetchJsonMock.mockResolvedValue({ value: [], "@odata.count": 0 });
+
+    await tool.execute("id", {
+      startDateTime: "2026-04-04T00:00:00",
+      endDateTime: "2026-04-04T23:59:59",
+    });
+
+    const [path, query] = client._fetchJsonMock.mock.calls[0];
+    expect(path).toBe("/me/calendarView");
+    expect(query.startDateTime).toBe("2026-04-04T00:00:00");
+    expect(query.endDateTime).toBe("2026-04-04T23:59:59");
+  });
+
+  it("returns error when only startDateTime provided", async () => {
+    const result = parseResult(await tool.execute("id", {
+      startDateTime: "2026-04-04T09:00:00",
+    }));
+
+    expect(result.error.category).toBe("user_input");
+    expect(result.error.message).toContain("Both startDateTime and endDateTime");
+  });
+
+  it("returns error when only endDateTime provided", async () => {
+    const result = parseResult(await tool.execute("id", {
+      endDateTime: "2026-04-04T17:00:00",
+    }));
+
+    expect(result.error.category).toBe("user_input");
+    expect(result.error.message).toContain("Both startDateTime and endDateTime");
+  });
+
+  it("returns error when startDateTime >= endDateTime", async () => {
+    const result = parseResult(await tool.execute("id", {
+      startDateTime: "2026-04-04T17:00:00",
+      endDateTime: "2026-04-04T09:00:00",
+    }));
+
+    expect(result.error.category).toBe("user_input");
+    expect(result.error.message).toContain("must be before");
+  });
+
+  it("returns error for invalid date format", async () => {
+    const result = parseResult(await tool.execute("id", {
+      startDateTime: "not-a-date",
+      endDateTime: "2026-04-04T17:00:00",
+    }));
+
+    expect(result.error.category).toBe("user_input");
+    expect(result.error.message).toContain("Invalid startDateTime");
+  });
+
+  it("uses default timezone America/Detroit in Prefer header", async () => {
+    client._fetchJsonMock.mockResolvedValue({ value: [], "@odata.count": 0 });
+
+    await tool.execute("id", {});
+
+    const extraHeaders = client._fetchJsonMock.mock.calls[0][2];
+    expect(extraHeaders.Prefer).toBe('outlook.timezone="America/Detroit"');
+  });
+
+  it("uses custom timezone when provided", async () => {
+    client._fetchJsonMock.mockResolvedValue({ value: [], "@odata.count": 0 });
+
+    await tool.execute("id", { timeZone: "America/Los_Angeles" });
+
+    const extraHeaders = client._fetchJsonMock.mock.calls[0][2];
+    expect(extraHeaders.Prefer).toBe('outlook.timezone="America/Los_Angeles"');
+  });
+
+  it("clamps top to 1-50", async () => {
+    client._fetchJsonMock.mockResolvedValue({ value: [], "@odata.count": 0 });
+
+    await tool.execute("id", { top: 999 });
+    expect(client._fetchJsonMock.mock.calls[0][1].$top).toBe("50");
+
+    client._fetchJsonMock.mockClear();
+
+    await tool.execute("id", { top: -5 });
+    expect(client._fetchJsonMock.mock.calls[0][1].$top).toBe("1");
+  });
+
+  it("passes filter and orderBy params", async () => {
+    client._fetchJsonMock.mockResolvedValue({ value: [], "@odata.count": 0 });
+
+    await tool.execute("id", {
+      filter: "importance eq 'high'",
+      orderBy: "start/dateTime desc",
+    });
+
+    const query = client._fetchJsonMock.mock.calls[0][1];
+    expect(query.$filter).toBe("importance eq 'high'");
+    expect(query.$orderby).toBe("start/dateTime desc");
+  });
+
+  it("preserves GraphApiError category", async () => {
+    client._fetchJsonMock.mockRejectedValue(
+      new GraphApiError("Forbidden", "permission", 403),
+    );
+
+    const result = parseResult(await tool.execute("id", {}));
+
+    expect(result.error.category).toBe("permission");
+    expect(result.error.message).toBe("Forbidden");
+  });
+
+  it("sanitizes non-GraphApiError messages", async () => {
+    client._fetchJsonMock.mockRejectedValue(
+      new Error("token=abc123 leaked at https://internal.url"),
+    );
+
+    const result = parseResult(await tool.execute("id", {}));
+
+    expect(result.error.category).toBe("transient");
+    expect(result.error.message).not.toContain("abc123");
+    expect(result.error.message).not.toContain("internal.url");
+  });
+
+  it("routes via resolveClient when provided", async () => {
+    const altClient = createMockGraphClient();
+    altClient._fetchJsonMock.mockResolvedValue({ value: [], "@odata.count": 0 });
+
+    const resolveClient = vi.fn().mockReturnValue(altClient);
+    const routedTool = createCalendarListTool({ graphClient: client, resolveClient });
+
+    await routedTool.execute("id", { account: "rod" });
+
+    expect(resolveClient).toHaveBeenCalledWith("calendar_list", "rod");
+    expect(altClient._fetchJsonMock).toHaveBeenCalled();
+    expect(client._fetchJsonMock).not.toHaveBeenCalled();
+  });
+
+  it("returns policy denial error from resolveClient", async () => {
+    const resolveClient = vi.fn().mockImplementation(() => {
+      throw new GraphApiError(
+        "Tool calendar_list is not permitted for account 'openclaw'.",
+        "user_input",
+        403,
+      );
+    });
+    const routedTool = createCalendarListTool({ graphClient: client, resolveClient });
+
+    const result = parseResult(await routedTool.execute("id", { account: "openclaw" }));
+
+    expect(result.error.category).toBe("user_input");
+    expect(result.error.message).toContain("not permitted");
+  });
+});
+
+// ── calendar_update tests ──────────────────────────────────────────────────
+
+describe("calendar_update", () => {
+  let client: ReturnType<typeof createMockGraphClient>;
+  let tool: ReturnType<typeof createCalendarUpdateTool>;
+
+  const UPDATED_EVENT: GraphEvent = {
+    id: "evt-update-1",
+    subject: "Updated Standup",
+    start: { dateTime: "2026-04-04T10:00:00", timeZone: "America/Detroit" },
+    end: { dateTime: "2026-04-04T10:30:00", timeZone: "America/Detroit" },
+  };
+
+  beforeEach(() => {
+    client = createMockGraphClient();
+    client._fetchMock.mockResolvedValue(
+      new Response(JSON.stringify(UPDATED_EVENT), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    tool = createCalendarUpdateTool({ graphClient: client });
+  });
+
+  it("updates subject only — PATCH body contains only subject", async () => {
+    await tool.execute("id", { eventId: "evt-1", subject: "New Title" });
+
+    const [path, init] = client._fetchMock.mock.calls[0];
+    expect(path).toBe("/me/events/evt-1");
+    expect(init.method).toBe("PATCH");
+    const body = JSON.parse(init.body);
+    expect(body.subject).toBe("New Title");
+    expect(body.start).toBeUndefined();
+    expect(body.end).toBeUndefined();
+  });
+
+  it("returns updated event formatted (200 with body)", async () => {
+    const result = parseResult(await tool.execute("id", {
+      eventId: "evt-update-1",
+      subject: "Updated Standup",
+    }));
+
+    expect(result.data.updated).toBe(true);
+    expect(result.data.event.id).toBe("evt-update-1");
+    expect(result.data.event.subject).toBe("Updated Standup");
+  });
+
+  it("handles PATCH returning empty response (204/no body)", async () => {
+    client._fetchMock.mockResolvedValue(
+      new Response(null, { status: 204 }),
+    );
+
+    const result = parseResult(await tool.execute("id", {
+      eventId: "evt-1",
+      subject: "Updated",
+    }));
+
+    expect(result.data.updated).toBe(true);
+    expect(result.data.eventId).toBe("evt-1");
+  });
+
+  it("updates multiple fields at once", async () => {
+    await tool.execute("id", {
+      eventId: "evt-1",
+      subject: "New Title",
+      location: "Room B",
+      importance: "high",
+    });
+
+    const body = JSON.parse(client._fetchMock.mock.calls[0][1].body);
+    expect(body.subject).toBe("New Title");
+    expect(body.location).toEqual({ displayName: "Room B" });
+    expect(body.importance).toBe("high");
+  });
+
+  it("uses custom timezone for start/end updates", async () => {
+    await tool.execute("id", {
+      eventId: "evt-1",
+      startDateTime: "2026-04-04T14:00:00",
+      endDateTime: "2026-04-04T15:00:00",
+      timeZone: "Europe/London",
+    });
+
+    const body = JSON.parse(client._fetchMock.mock.calls[0][1].body);
+    expect(body.start).toEqual({ dateTime: "2026-04-04T14:00:00", timeZone: "Europe/London" });
+    expect(body.end).toEqual({ dateTime: "2026-04-04T15:00:00", timeZone: "Europe/London" });
+  });
+
+  it("returns error for missing eventId", async () => {
+    const result = parseResult(await tool.execute("id", { subject: "No ID" }));
+
+    expect(result.error.category).toBe("user_input");
+    expect(result.error.message).toContain("eventId");
+  });
+
+  it("returns error for no mutable fields provided (empty update)", async () => {
+    const result = parseResult(await tool.execute("id", { eventId: "evt-1" }));
+
+    expect(result.error.category).toBe("user_input");
+    expect(result.error.message).toContain("At least one field");
+  });
+
+  it("handles not_found error (404)", async () => {
+    client._fetchMock.mockRejectedValue(
+      new GraphApiError("Resource not found", "not_found", 404),
+    );
+
+    const result = parseResult(await tool.execute("id", {
+      eventId: "evt-missing",
+      subject: "Update",
+    }));
+
+    expect(result.error.category).toBe("not_found");
+  });
+
+  it("sanitizes non-GraphApiError messages", async () => {
+    client._fetchMock.mockRejectedValue(
+      new Error("token=secret123 at https://internal"),
+    );
+
+    const result = parseResult(await tool.execute("id", {
+      eventId: "evt-1",
+      subject: "Update",
+    }));
+
+    expect(result.error.category).toBe("transient");
+    expect(result.error.message).not.toContain("secret123");
+  });
+});
+
+// ── calendar_delete tests ──────────────────────────────────────────────────
+
+describe("calendar_delete", () => {
+  let client: ReturnType<typeof createMockGraphClient>;
+  let tool: ReturnType<typeof createCalendarDeleteTool>;
+
+  beforeEach(() => {
+    client = createMockGraphClient();
+    client._fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
+    tool = createCalendarDeleteTool({ graphClient: client });
+  });
+
+  it("deletes event successfully", async () => {
+    const result = parseResult(await tool.execute("id", { eventId: "evt-1" }));
+
+    const [path, init] = client._fetchMock.mock.calls[0];
+    expect(path).toBe("/me/events/evt-1");
+    expect(init.method).toBe("DELETE");
+    expect(result.data.deleted).toBe(true);
+    expect(result.data.eventId).toBe("evt-1");
+  });
+
+  it("encodes eventId in path", async () => {
+    await tool.execute("id", { eventId: "AAMkAD+special/chars=" });
+
+    const path = client._fetchMock.mock.calls[0][0];
+    expect(path).toBe(`/me/events/${encodeURIComponent("AAMkAD+special/chars=")}`);
+  });
+
+  it("returns error for missing eventId", async () => {
+    const result = parseResult(await tool.execute("id", {}));
+
+    expect(result.error.category).toBe("user_input");
+    expect(result.error.message).toContain("eventId");
+  });
+
+  it("handles not_found error (404)", async () => {
+    client._fetchMock.mockRejectedValue(
+      new GraphApiError("Resource not found", "not_found", 404),
+    );
+
+    const result = parseResult(await tool.execute("id", { eventId: "evt-gone" }));
+
+    expect(result.error.category).toBe("not_found");
+  });
+
+  it("sanitizes non-GraphApiError messages", async () => {
+    client._fetchMock.mockRejectedValue(
+      new Error("token=leaked at https://internal"),
+    );
+
+    const result = parseResult(await tool.execute("id", { eventId: "evt-1" }));
+
+    expect(result.error.category).toBe("transient");
+    expect(result.error.message).not.toContain("leaked");
+  });
+});
+
+// ── calendar_create tests ──────────────────────────────────────────────────
+
+describe("calendar_create", () => {
+  let client: ReturnType<typeof createMockGraphClient>;
+  let tool: ReturnType<typeof createCalendarCreateTool>;
+
+  const CREATED_EVENT: GraphEvent = {
+    id: "evt-new-1",
+    subject: "New Meeting",
+    start: { dateTime: "2026-04-05T09:00:00", timeZone: "America/Detroit" },
+    end: { dateTime: "2026-04-05T10:00:00", timeZone: "America/Detroit" },
+    organizer: { emailAddress: { name: "Rod", address: "rod@test.com" } },
+  };
+
+  beforeEach(() => {
+    client = createMockGraphClient();
+    client._fetchMock.mockResolvedValue(
+      new Response(JSON.stringify(CREATED_EVENT), {
+        status: 201,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    tool = createCalendarCreateTool({ graphClient: client });
+  });
+
+  it("creates event with required fields only", async () => {
+    const result = parseResult(await tool.execute("id", {
+      subject: "New Meeting",
+      startDateTime: "2026-04-05T09:00:00",
+      endDateTime: "2026-04-05T10:00:00",
+    }));
+
+    const [path, init] = client._fetchMock.mock.calls[0];
+    expect(path).toBe("/me/events");
+    expect(init.method).toBe("POST");
+
+    const body = JSON.parse(init.body);
+    expect(body.subject).toBe("New Meeting");
+    expect(body.start.dateTime).toBe("2026-04-05T09:00:00");
+    expect(body.end.dateTime).toBe("2026-04-05T10:00:00");
+
+    expect(result.data.created).toBe(true);
+  });
+
+  it("returns created event formatted with formatEventSummary", async () => {
+    const result = parseResult(await tool.execute("id", {
+      subject: "New Meeting",
+      startDateTime: "2026-04-05T09:00:00",
+      endDateTime: "2026-04-05T10:00:00",
+    }));
+
+    expect(result.data.event.id).toBe("evt-new-1");
+    expect(result.data.event.subject).toBe("New Meeting");
+    expect(result.data.event.organizer).toBe("Rod <rod@test.com>");
+  });
+
+  it("creates event with all optional fields", async () => {
+    await tool.execute("id", {
+      subject: "Full Event",
+      startDateTime: "2026-04-05T09:00:00",
+      endDateTime: "2026-04-05T10:00:00",
+      body: "<p>Agenda here</p>",
+      location: "Room C",
+      attendees: ["alice@test.com", "bob@test.com"],
+      isAllDay: false,
+      importance: "high",
+      showAs: "tentative",
+      isOnlineMeeting: true,
+    });
+
+    const body = JSON.parse(client._fetchMock.mock.calls[0][1].body);
+    expect(body.body).toEqual({ contentType: "HTML", content: "<p>Agenda here</p>" });
+    expect(body.location).toEqual({ displayName: "Room C" });
+    expect(body.attendees).toEqual([
+      { emailAddress: { address: "alice@test.com" }, type: "required" },
+      { emailAddress: { address: "bob@test.com" }, type: "required" },
+    ]);
+    expect(body.importance).toBe("high");
+    expect(body.showAs).toBe("tentative");
+    expect(body.isOnlineMeeting).toBe(true);
+  });
+
+  it("uses custom timezone for start/end", async () => {
+    await tool.execute("id", {
+      subject: "UTC Meeting",
+      startDateTime: "2026-04-05T14:00:00",
+      endDateTime: "2026-04-05T15:00:00",
+      timeZone: "UTC",
+    });
+
+    const body = JSON.parse(client._fetchMock.mock.calls[0][1].body);
+    expect(body.start.timeZone).toBe("UTC");
+    expect(body.end.timeZone).toBe("UTC");
+  });
+
+  it("uses default timezone America/Detroit when timeZone omitted", async () => {
+    await tool.execute("id", {
+      subject: "Local Meeting",
+      startDateTime: "2026-04-05T09:00:00",
+      endDateTime: "2026-04-05T10:00:00",
+    });
+
+    const body = JSON.parse(client._fetchMock.mock.calls[0][1].body);
+    expect(body.start.timeZone).toBe("America/Detroit");
+    expect(body.end.timeZone).toBe("America/Detroit");
+  });
+
+  it("returns error for missing subject", async () => {
+    const result = parseResult(await tool.execute("id", {
+      startDateTime: "2026-04-05T09:00:00",
+      endDateTime: "2026-04-05T10:00:00",
+    }));
+
+    expect(result.error.category).toBe("user_input");
+    expect(result.error.message).toContain("subject");
+  });
+
+  it("returns error for missing startDateTime", async () => {
+    const result = parseResult(await tool.execute("id", {
+      subject: "Test",
+      endDateTime: "2026-04-05T10:00:00",
+    }));
+
+    expect(result.error.category).toBe("user_input");
+    expect(result.error.message).toContain("startDateTime");
+  });
+
+  it("returns error for missing endDateTime", async () => {
+    const result = parseResult(await tool.execute("id", {
+      subject: "Test",
+      startDateTime: "2026-04-05T09:00:00",
+    }));
+
+    expect(result.error.category).toBe("user_input");
+    expect(result.error.message).toContain("endDateTime");
+  });
+
+  it("returns error when endDateTime <= startDateTime", async () => {
+    const result = parseResult(await tool.execute("id", {
+      subject: "Test",
+      startDateTime: "2026-04-05T10:00:00",
+      endDateTime: "2026-04-05T09:00:00",
+    }));
+
+    expect(result.error.category).toBe("user_input");
+    expect(result.error.message).toContain("must be before");
+  });
+
+  it("treats empty attendees array as omitted", async () => {
+    await tool.execute("id", {
+      subject: "Solo Meeting",
+      startDateTime: "2026-04-05T09:00:00",
+      endDateTime: "2026-04-05T10:00:00",
+      attendees: [],
+    });
+
+    const body = JSON.parse(client._fetchMock.mock.calls[0][1].body);
+    expect(body.attendees).toBeUndefined();
+  });
+
+  it("preserves GraphApiError category", async () => {
+    client._fetchMock.mockRejectedValue(
+      new GraphApiError("Forbidden", "permission", 403),
+    );
+
+    const result = parseResult(await tool.execute("id", {
+      subject: "Test",
+      startDateTime: "2026-04-05T09:00:00",
+      endDateTime: "2026-04-05T10:00:00",
+    }));
+
+    expect(result.error.category).toBe("permission");
+  });
+
+  it("sanitizes non-GraphApiError messages", async () => {
+    client._fetchMock.mockRejectedValue(
+      new Error("token=secret at https://internal"),
+    );
+
+    const result = parseResult(await tool.execute("id", {
+      subject: "Test",
+      startDateTime: "2026-04-05T09:00:00",
+      endDateTime: "2026-04-05T10:00:00",
+    }));
+
+    expect(result.error.category).toBe("transient");
+    expect(result.error.message).not.toContain("secret");
   });
 });

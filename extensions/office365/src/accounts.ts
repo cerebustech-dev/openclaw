@@ -10,6 +10,10 @@ const KNOWN_TOOLS = new Set([
   "email_send",
   "email_reply",
   "email_search",
+  "calendar_list",
+  "calendar_create",
+  "calendar_update",
+  "calendar_delete",
 ]);
 
 // ── Mode detection ─────────────────────────────────────────────────────────

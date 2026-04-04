@@ -36,6 +36,39 @@ export type AttachmentMeta = {
   size: number;
 };
 
+// ── Calendar event types ────────────────────────────────────────────────────
+
+export type GraphEvent = {
+  id: string;
+  subject?: string;
+  body?: { contentType: string; content: string };
+  bodyPreview?: string;
+  start?: { dateTime: string; timeZone: string };
+  end?: { dateTime: string; timeZone: string };
+  location?: { displayName?: string };
+  organizer?: { emailAddress: { name?: string; address: string } };
+  attendees?: Array<{
+    emailAddress: { name?: string; address: string };
+    type: string;
+    status?: { response: string; time: string };
+  }>;
+  isAllDay?: boolean;
+  isCancelled?: boolean;
+  isOnlineMeeting?: boolean;
+  onlineMeetingUrl?: string;
+  importance?: string;
+  showAs?: string;
+  createdDateTime?: string;
+  lastModifiedDateTime?: string;
+  webLink?: string;
+};
+
+export type GraphEventListResponse = {
+  value?: GraphEvent[];
+  "@odata.count"?: number;
+  "@odata.nextLink"?: string;
+};
+
 // ── Error taxonomy ──────────────────────────────────────────────────────────
 
 export type GraphErrorCategory =

@@ -32,20 +32,20 @@ vi.mock("./src/oauth.js", () => ({
 // ── Issue 1: DEFAULT_SCOPES least-privilege ────────────────────────────────
 
 describe("DEFAULT_SCOPES", () => {
-  it("includes Phase 2 scopes (read + send email, user, offline)", () => {
-    expect(DEFAULT_SCOPES).toEqual(["Mail.Read", "Mail.Send", "User.Read", "offline_access"]);
+  it("includes Phase 3 scopes (email + calendar + user + offline)", () => {
+    expect(DEFAULT_SCOPES).toEqual(["Mail.Read", "Mail.Send", "Calendars.ReadWrite", "User.Read", "offline_access"]);
   });
 
-  it("includes Mail.Send for Phase 2", () => {
+  it("includes Mail.Send for email", () => {
     expect(DEFAULT_SCOPES).toContain("Mail.Send");
+  });
+
+  it("includes Calendars.ReadWrite for calendar", () => {
+    expect(DEFAULT_SCOPES).toContain("Calendars.ReadWrite");
   });
 
   it("does not include Mail.ReadWrite", () => {
     expect(DEFAULT_SCOPES).not.toContain("Mail.ReadWrite");
-  });
-
-  it("does not include Calendars.ReadWrite", () => {
-    expect(DEFAULT_SCOPES).not.toContain("Calendars.ReadWrite");
   });
 });
 
@@ -207,7 +207,7 @@ describe("office365Plugin.register", () => {
 
     expect(registeredProviders).toHaveLength(1);
     expect(registeredProviders[0].id).toBe("microsoft-graph");
-    expect(registeredTools).toHaveLength(5);
+    expect(registeredTools).toHaveLength(9);
   });
 
   it("registers per-account providers in multi-account mode", async () => {
@@ -240,7 +240,7 @@ describe("office365Plugin.register", () => {
     expect(providerIds).toContain("microsoft-graph-rod");
     expect(providerIds).toContain("microsoft-graph-openclaw");
     // Should still register all 4 tools
-    expect(registeredTools).toHaveLength(5);
+    expect(registeredTools).toHaveLength(9);
   });
 
   it("throws at startup for invalid multi-account config", async () => {

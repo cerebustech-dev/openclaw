@@ -335,3 +335,52 @@ describe("ACCOUNT_ID_RE", () => {
     expect(ACCOUNT_ID_RE.test("a/b")).toBe(false);
   });
 });
+
+// ── Calendar tool routing ──────────────────────────────────────────────────
+
+describe("calendar tool routing", () => {
+  const CALENDAR_CONFIG: Office365Config = {
+    clientId: "test-client",
+    tenantId: "test-tenant",
+    clientSecret: "test-secret",
+    redirectUri: "http://localhost:8080/callback",
+    scopes: ["User.Read", "offline_access"],
+    defaultAccount: "rod",
+    accounts: {
+      rod: {
+        name: "Rod",
+        email: "Rod@CerebusTechnologies.onmicrosoft.com",
+        scopes: ["Mail.Read", "Calendars.ReadWrite", "User.Read", "offline_access"],
+        tools: ["email_list", "email_read", "email_search", "calendar_list", "calendar_create", "calendar_update", "calendar_delete"],
+      },
+      openclaw: {
+        name: "OpenClaw (Sender)",
+        email: "openclaw@cerebustechnologies.com",
+        scopes: ["Mail.Send", "Mail.Read", "User.Read", "offline_access"],
+        tools: ["email_send", "email_reply"],
+      },
+    },
+  };
+
+  it("resolveAccountForTool maps calendar tools to rod", () => {
+    expect(resolveAccountForTool("calendar_list", CALENDAR_CONFIG)).toBe("rod");
+    expect(resolveAccountForTool("calendar_create", CALENDAR_CONFIG)).toBe("rod");
+    expect(resolveAccountForTool("calendar_update", CALENDAR_CONFIG)).toBe("rod");
+    expect(resolveAccountForTool("calendar_delete", CALENDAR_CONFIG)).toBe("rod");
+  });
+
+  it("validateAccountsConfig accepts calendar tool names", () => {
+    const errors = validateAccountsConfig(CALENDAR_CONFIG);
+    expect(errors).toEqual([]);
+  });
+
+  it("isToolPermittedForAccount allows calendar tools for rod", () => {
+    expect(isToolPermittedForAccount("calendar_list", "rod", CALENDAR_CONFIG)).toBe(true);
+    expect(isToolPermittedForAccount("calendar_create", "rod", CALENDAR_CONFIG)).toBe(true);
+  });
+
+  it("isToolPermittedForAccount denies calendar tools for openclaw", () => {
+    expect(isToolPermittedForAccount("calendar_list", "openclaw", CALENDAR_CONFIG)).toBe(false);
+    expect(isToolPermittedForAccount("calendar_create", "openclaw", CALENDAR_CONFIG)).toBe(false);
+  });
+});
