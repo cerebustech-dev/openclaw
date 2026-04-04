@@ -991,45 +991,38 @@ describe("email_search", () => {
 
   // ── Cycle 4: date range ───────────────────────────────────────────────────
 
-  it("dateFrom creates $filter and combines with $search", async () => {
+  it("dateFrom with query uses KQL received>= instead of $filter", async () => {
     client._fetchJsonMock.mockResolvedValue({ value: [], "@odata.count": 0 });
 
     await tool.execute("id", { query: "report", dateFrom: "2026-01-01" });
 
-    expect(client._fetchJsonMock).toHaveBeenCalledWith(
-      "/me/messages",
-      expect.objectContaining({
-        $filter: "receivedDateTime ge 2026-01-01T00:00:00Z",
-        $search: expect.stringContaining("report"),
-      }),
-      expect.objectContaining({ ConsistencyLevel: "eventual" }),
-    );
+    const q = client._fetchJsonMock.mock.calls[0][1];
+    // Dates go into KQL when combined with text search (Graph blocks $search + $filter)
+    expect(q.$search).toContain("received>=2026-01-01");
+    expect(q.$search).toContain("report");
+    expect(q.$filter).toBeUndefined();
   });
 
-  it("dateTo uses exclusive next-day boundary for date-only input", async () => {
+  it("dateTo with query uses KQL received<= with inclusive date", async () => {
     client._fetchJsonMock.mockResolvedValue({ value: [], "@odata.count": 0 });
 
     await tool.execute("id", { query: "report", dateTo: "2026-03-31" });
 
-    expect(client._fetchJsonMock).toHaveBeenCalledWith(
-      "/me/messages",
-      expect.objectContaining({
-        $filter: "receivedDateTime lt 2026-04-01T00:00:00Z",
-      }),
-      expect.any(Object),
-    );
+    const q = client._fetchJsonMock.mock.calls[0][1];
+    expect(q.$search).toContain("received<=2026-03-31");
+    expect(q.$filter).toBeUndefined();
   });
 
-  it("dateFrom + dateTo combines into one $filter", async () => {
+  it("dateFrom + dateTo + from combines into KQL with no $filter", async () => {
     client._fetchJsonMock.mockResolvedValue({ value: [], "@odata.count": 0 });
 
     await tool.execute("id", { from: "alice@test.com", dateFrom: "2026-01-01", dateTo: "2026-03-31" });
 
-    const query = client._fetchJsonMock.mock.calls[0][1];
-    expect(query.$filter).toContain("receivedDateTime ge 2026-01-01T00:00:00Z");
-    expect(query.$filter).toContain("receivedDateTime lt 2026-04-01T00:00:00Z");
-    expect(query.$filter).toContain(" and ");
-    expect(query.$search).toContain("from:alice@test.com");
+    const q = client._fetchJsonMock.mock.calls[0][1];
+    expect(q.$search).toContain("from:alice@test.com");
+    expect(q.$search).toContain("received>=2026-01-01");
+    expect(q.$search).toContain("received<=2026-03-31");
+    expect(q.$filter).toBeUndefined();
   });
 
   it("date-only search omits $search and ConsistencyLevel", async () => {

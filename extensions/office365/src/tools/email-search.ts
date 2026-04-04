@@ -19,6 +19,8 @@ function buildKql(params: {
   to?: string;
   subject?: string;
   hasAttachments?: boolean;
+  dateFrom?: string;
+  dateTo?: string;
 }): string {
   const parts: string[] = [];
 
@@ -26,6 +28,8 @@ function buildKql(params: {
   if (params.to) parts.push(`to:${kqlQuoteIfNeeded(params.to)}`);
   if (params.subject) parts.push(`subject:${kqlQuoteIfNeeded(params.subject)}`);
   if (params.hasAttachments !== undefined) parts.push(`hasAttachments:${params.hasAttachments}`);
+  if (params.dateFrom) parts.push(`received>=${params.dateFrom}`);
+  if (params.dateTo) parts.push(`received<=${params.dateTo}`);
   if (params.query) parts.push(params.query);
 
   return parts.join(" ");
@@ -191,7 +195,24 @@ export function createEmailSearchTool(deps: {
         };
 
         // Build KQL from structured fields + free-text
-        const kql = buildKql({ query, from, to, subject, hasAttachments });
+        // Graph API blocks combining $search with $filter, so when we have
+        // text/field criteria AND dates, dates go into KQL as received>=/<=
+        // (day granularity). $filter is only used for date-only searches.
+        const hasTextCriteria = !!(query || from || to || subject || hasAttachments !== undefined);
+        const hasDates = !!(dateFromIso || dateToIso);
+
+        // Extract YYYY-MM-DD for KQL date clauses
+        const dateFromDate = dateFromIso?.slice(0, 10);
+        const dateToDate = dateToRaw && dateToIso
+          ? (DATE_ONLY_RE.test(dateToRaw) ? dateToRaw : dateToIso.slice(0, 10))
+          : undefined;
+
+        const kql = buildKql({
+          query, from, to, subject, hasAttachments,
+          // Only include dates in KQL when combining with text criteria
+          dateFrom: hasTextCriteria && dateFromDate ? dateFromDate : undefined,
+          dateTo: hasTextCriteria && dateToDate ? dateToDate : undefined,
+        });
         const hasKql = kql.length > 0;
 
         if (hasKql) {
@@ -199,11 +220,11 @@ export function createEmailSearchTool(deps: {
           oDataQuery.$search = `"${kql.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
         }
 
-        // Build $filter for date ranges
-        const filterClauses: string[] = [];
-        if (dateFromIso) filterClauses.push(`receivedDateTime ge ${dateFromIso}`);
-        if (dateToIso) filterClauses.push(`receivedDateTime lt ${dateToIso}`);
-        if (filterClauses.length > 0) {
+        // $filter for date ranges ONLY when no text criteria (pure date search)
+        if (hasDates && !hasTextCriteria) {
+          const filterClauses: string[] = [];
+          if (dateFromIso) filterClauses.push(`receivedDateTime ge ${dateFromIso}`);
+          if (dateToIso) filterClauses.push(`receivedDateTime lt ${dateToIso}`);
           oDataQuery.$filter = filterClauses.join(" and ");
         }
 
