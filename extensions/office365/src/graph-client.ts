@@ -81,7 +81,9 @@ async function graphFetch(url: string, init: RequestInit): Promise<Response> {
     timeoutMs: FETCH_TIMEOUT_MS,
   });
   try {
-    const body = await response.arrayBuffer();
+    // Null-body status codes (204, 304) must have null body per Fetch spec
+    const isNullBody = response.status === 204 || response.status === 205 || response.status === 304;
+    const body = isNullBody ? null : await response.arrayBuffer();
     return new Response(body, {
       status: response.status,
       statusText: response.statusText,
