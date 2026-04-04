@@ -12,6 +12,7 @@ import { createEmailListTool } from "./src/tools/email-list.js";
 import { createEmailReadTool } from "./src/tools/email-read.js";
 import { createEmailSendTool } from "./src/tools/email-send.js";
 import { createEmailReplyTool } from "./src/tools/email-reply.js";
+import { createEmailSearchTool } from "./src/tools/email-search.js";
 import { GraphApiError } from "./src/types.js";
 import type { Office365AccountConfig, Office365Config } from "./src/types.js";
 import {
@@ -233,6 +234,7 @@ const office365Plugin = {
       api.registerTool(createEmailReadTool(toolDeps));
       api.registerTool(createEmailSendTool(toolDeps));
       api.registerTool(createEmailReplyTool(toolDeps));
+      api.registerTool(createEmailSearchTool(toolDeps));
 
       // Multi-account prompt context
       api.on("before_prompt_build", async () => {
@@ -311,7 +313,7 @@ const office365Plugin = {
                   },
                   configPatch: {},
                   notes: [
-                    "Microsoft 365 email tools are now available: email_list, email_read, email_send, email_reply.",
+                    "Microsoft 365 email tools are now available: email_list, email_read, email_send, email_reply, email_search.",
                   ],
                 });
               } catch (err) {
@@ -345,6 +347,7 @@ const office365Plugin = {
       api.registerTool(createEmailReadTool({ graphClient }));
       api.registerTool(createEmailSendTool({ graphClient }));
       api.registerTool(createEmailReplyTool({ graphClient }));
+      api.registerTool(createEmailSearchTool({ graphClient }));
 
       const credentialFile = join(stateDir, "office365-credentials.json");
 
@@ -354,7 +357,7 @@ const office365Plugin = {
         }
         return {
           prependContext:
-            "Microsoft 365 email tools are available: email_list (list/search messages), email_read (read full message by ID), email_send (compose and send new email), email_reply (reply to existing email).",
+            "Microsoft 365 email tools are available: email_list (list/search messages), email_read (read full message by ID), email_send (compose and send new email), email_reply (reply to existing email), email_search (structured search across all folders with date ranges, sender/recipient/subject filters).",
         };
       });
     }

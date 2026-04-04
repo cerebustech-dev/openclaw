@@ -1,7 +1,8 @@
 import { Type } from "@sinclair/typebox";
 import type { GraphClient } from "../graph-client.js";
-import type { GraphListResponse, GraphMessage } from "../types.js";
+import type { GraphListResponse } from "../types.js";
 import { GraphApiError, toolSuccess, toolError } from "../types.js";
+import { SELECT_FIELDS, formatMessageSummary } from "./_email-shared.js";
 
 // ── Folder mapping ──────────────────────────────────────────────────────────
 
@@ -78,35 +79,7 @@ export const EmailListSchema = Type.Object({
   ),
 });
 
-// ── Message formatting ──────────────────────────────────────────────────────
-
-function formatAddress(addr: GraphMessage["from"]): string {
-  if (!addr?.emailAddress) return "(unknown)";
-  const { name, address } = addr.emailAddress;
-  return name ? `${name} <${address}>` : address;
-}
-
-function formatMessageSummary(msg: GraphMessage) {
-  return {
-    id: msg.id,
-    subject: msg.subject ?? "(no subject)",
-    from: formatAddress(msg.from),
-    to: (msg.toRecipients ?? [])
-      .map((r) => r.emailAddress?.address)
-      .filter(Boolean),
-    receivedDateTime: msg.receivedDateTime,
-    isRead: msg.isRead ?? false,
-    hasAttachments: msg.hasAttachments ?? false,
-    bodyPreview: msg.bodyPreview ?? "",
-    importance: msg.importance ?? "normal",
-    flagStatus: msg.flag?.flagStatus ?? "notFlagged",
-  };
-}
-
 // ── Tool factory ────────────────────────────────────────────────────────────
-
-const SELECT_FIELDS =
-  "id,subject,from,toRecipients,receivedDateTime,isRead,hasAttachments,bodyPreview,importance,flag";
 
 export function createEmailListTool(deps: {
   graphClient: GraphClient;

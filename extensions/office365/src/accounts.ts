@@ -9,6 +9,7 @@ const KNOWN_TOOLS = new Set([
   "email_read",
   "email_send",
   "email_reply",
+  "email_search",
 ]);
 
 // ── Mode detection ─────────────────────────────────────────────────────────

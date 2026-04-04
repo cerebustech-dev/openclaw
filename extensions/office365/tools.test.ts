@@ -4,6 +4,7 @@ import { createEmailListTool } from "./src/tools/email-list.js";
 import { createEmailReadTool } from "./src/tools/email-read.js";
 import { createEmailSendTool } from "./src/tools/email-send.js";
 import { createEmailReplyTool } from "./src/tools/email-reply.js";
+import { createEmailSearchTool } from "./src/tools/email-search.js";
 import { GraphApiError } from "./src/types.js";
 
 // ── Mock Graph client ───────────────────────────────────────────────────────
@@ -846,6 +847,384 @@ describe("email_reply", () => {
 });
 
 // ── Phase 3: Multi-account routing + policy enforcement ───────────────────
+
+// ── email_search tests ─────────────────────────────────────────────────────
+
+describe("email_search", () => {
+  let client: ReturnType<typeof createMockGraphClient>;
+  let tool: ReturnType<typeof createEmailSearchTool>;
+
+  beforeEach(() => {
+    client = createMockGraphClient();
+    tool = createEmailSearchTool({ graphClient: client });
+  });
+
+  // ── Cycle 1: free-text query ──────────────────────────────────────────────
+
+  it("calls /me/messages with $search and ConsistencyLevel header", async () => {
+    client._fetchJsonMock.mockResolvedValue({ value: [], "@odata.count": 0 });
+
+    await tool.execute("id", { query: "quarterly report" });
+
+    expect(client._fetchJsonMock).toHaveBeenCalledWith(
+      "/me/messages",
+      expect.objectContaining({
+        $search: expect.stringContaining("quarterly report"),
+        $count: "true",
+      }),
+      expect.objectContaining({ ConsistencyLevel: "eventual" }),
+    );
+  });
+
+  it("returns formatted message summaries", async () => {
+    client._fetchJsonMock.mockResolvedValue({
+      value: [
+        {
+          id: "msg-1",
+          subject: "Test Subject",
+          from: { emailAddress: { name: "Sender", address: "sender@test.com" } },
+          toRecipients: [{ emailAddress: { address: "to@test.com" } }],
+          receivedDateTime: "2026-04-02T10:00:00Z",
+          isRead: false,
+          hasAttachments: true,
+          bodyPreview: "Preview text",
+          importance: "high",
+          flag: { flagStatus: "flagged" },
+        },
+      ],
+      "@odata.count": 42,
+      "@odata.nextLink": "https://graph.microsoft.com/next",
+    });
+
+    const result = await tool.execute("id", { query: "test" });
+    const parsed = parseResult(result);
+
+    expect(parsed.data.messages).toHaveLength(1);
+    expect(parsed.data.messages[0]).toEqual({
+      id: "msg-1",
+      subject: "Test Subject",
+      from: "Sender <sender@test.com>",
+      to: ["to@test.com"],
+      receivedDateTime: "2026-04-02T10:00:00Z",
+      isRead: false,
+      hasAttachments: true,
+      bodyPreview: "Preview text",
+      importance: "high",
+      flagStatus: "flagged",
+    });
+    expect(parsed.data.totalCount).toBe(42);
+    expect(parsed.data.hasMore).toBe(true);
+  });
+
+  // ── Cycle 2: structured KQL fields ─────────────────────────────────────────
+
+  it("from field generates KQL from: clause", async () => {
+    client._fetchJsonMock.mockResolvedValue({ value: [], "@odata.count": 0 });
+
+    await tool.execute("id", { from: "alice@test.com" });
+
+    expect(client._fetchJsonMock).toHaveBeenCalledWith(
+      "/me/messages",
+      expect.objectContaining({
+        $search: expect.stringContaining("from:alice@test.com"),
+      }),
+      expect.objectContaining({ ConsistencyLevel: "eventual" }),
+    );
+  });
+
+  it("subject with spaces is quoted in KQL", async () => {
+    client._fetchJsonMock.mockResolvedValue({ value: [], "@odata.count": 0 });
+
+    await tool.execute("id", { subject: "quarterly report" });
+
+    // KQL: subject:"quarterly report" → OData wrapping escapes inner quotes
+    const searchArg = client._fetchJsonMock.mock.calls[0][1].$search;
+    expect(searchArg).toContain("subject:");
+    expect(searchArg).toContain("quarterly report");
+  });
+
+  it("to field generates KQL to: clause", async () => {
+    client._fetchJsonMock.mockResolvedValue({ value: [], "@odata.count": 0 });
+
+    await tool.execute("id", { to: "bob@test.com" });
+
+    expect(client._fetchJsonMock).toHaveBeenCalledWith(
+      "/me/messages",
+      expect.objectContaining({
+        $search: expect.stringContaining("to:bob@test.com"),
+      }),
+      expect.any(Object),
+    );
+  });
+
+  it("combines from, subject, and query into one KQL string", async () => {
+    client._fetchJsonMock.mockResolvedValue({ value: [], "@odata.count": 0 });
+
+    await tool.execute("id", { from: "alice@test.com", subject: "report", query: "financials" });
+
+    const searchArg = client._fetchJsonMock.mock.calls[0][1].$search;
+    expect(searchArg).toContain("from:alice@test.com");
+    expect(searchArg).toContain("subject:report");
+    expect(searchArg).toContain("financials");
+  });
+
+  // ── Cycle 3: hasAttachments ─────────────────────────────────────────────────
+
+  it("hasAttachments true adds KQL clause", async () => {
+    client._fetchJsonMock.mockResolvedValue({ value: [], "@odata.count": 0 });
+
+    await tool.execute("id", { query: "invoice", hasAttachments: true });
+
+    const searchArg = client._fetchJsonMock.mock.calls[0][1].$search;
+    expect(searchArg).toContain("hasAttachments:true");
+    expect(searchArg).toContain("invoice");
+  });
+
+  it("hasAttachments false adds KQL clause", async () => {
+    client._fetchJsonMock.mockResolvedValue({ value: [], "@odata.count": 0 });
+
+    await tool.execute("id", { from: "test@test.com", hasAttachments: false });
+
+    const searchArg = client._fetchJsonMock.mock.calls[0][1].$search;
+    expect(searchArg).toContain("hasAttachments:false");
+  });
+
+  // ── Cycle 4: date range ───────────────────────────────────────────────────
+
+  it("dateFrom creates $filter and combines with $search", async () => {
+    client._fetchJsonMock.mockResolvedValue({ value: [], "@odata.count": 0 });
+
+    await tool.execute("id", { query: "report", dateFrom: "2026-01-01" });
+
+    expect(client._fetchJsonMock).toHaveBeenCalledWith(
+      "/me/messages",
+      expect.objectContaining({
+        $filter: "receivedDateTime ge 2026-01-01T00:00:00Z",
+        $search: expect.stringContaining("report"),
+      }),
+      expect.objectContaining({ ConsistencyLevel: "eventual" }),
+    );
+  });
+
+  it("dateTo uses exclusive next-day boundary for date-only input", async () => {
+    client._fetchJsonMock.mockResolvedValue({ value: [], "@odata.count": 0 });
+
+    await tool.execute("id", { query: "report", dateTo: "2026-03-31" });
+
+    expect(client._fetchJsonMock).toHaveBeenCalledWith(
+      "/me/messages",
+      expect.objectContaining({
+        $filter: "receivedDateTime lt 2026-04-01T00:00:00Z",
+      }),
+      expect.any(Object),
+    );
+  });
+
+  it("dateFrom + dateTo combines into one $filter", async () => {
+    client._fetchJsonMock.mockResolvedValue({ value: [], "@odata.count": 0 });
+
+    await tool.execute("id", { from: "alice@test.com", dateFrom: "2026-01-01", dateTo: "2026-03-31" });
+
+    const query = client._fetchJsonMock.mock.calls[0][1];
+    expect(query.$filter).toContain("receivedDateTime ge 2026-01-01T00:00:00Z");
+    expect(query.$filter).toContain("receivedDateTime lt 2026-04-01T00:00:00Z");
+    expect(query.$filter).toContain(" and ");
+    expect(query.$search).toContain("from:alice@test.com");
+  });
+
+  it("date-only search omits $search and ConsistencyLevel", async () => {
+    client._fetchJsonMock.mockResolvedValue({ value: [], "@odata.count": 0 });
+
+    await tool.execute("id", { dateFrom: "2026-01-01" });
+
+    const query = client._fetchJsonMock.mock.calls[0][1];
+    expect(query.$filter).toContain("receivedDateTime ge");
+    expect(query.$search).toBeUndefined();
+    expect(query.$orderby).toBe("receivedDateTime desc");
+
+    // ConsistencyLevel should NOT be sent for filter-only
+    const headers = client._fetchJsonMock.mock.calls[0][2];
+    expect(headers?.ConsistencyLevel).toBeUndefined();
+  });
+
+  it("rejects invalid dateFrom format", async () => {
+    const result = await tool.execute("id", { query: "test", dateFrom: "not-a-date" });
+    const parsed = parseResult(result);
+
+    expect(parsed.error).toBeDefined();
+    expect(parsed.error.category).toBe("user_input");
+    expect(parsed.error.message).toContain("dateFrom");
+  });
+
+  it("rejects dateFrom after dateTo", async () => {
+    const result = await tool.execute("id", { query: "test", dateFrom: "2026-06-01", dateTo: "2026-01-01" });
+    const parsed = parseResult(result);
+
+    expect(parsed.error).toBeDefined();
+    expect(parsed.error.category).toBe("user_input");
+    expect(parsed.error.message).toContain("before");
+  });
+
+  // ── Cycle 5: pagination and ordering ──────────────────────────────────────
+
+  it("defaults to $top 10", async () => {
+    client._fetchJsonMock.mockResolvedValue({ value: [], "@odata.count": 0 });
+
+    await tool.execute("id", { query: "test" });
+
+    expect(client._fetchJsonMock).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ $top: "10" }),
+      expect.any(Object),
+    );
+  });
+
+  it("clamps top to 1-50", async () => {
+    client._fetchJsonMock.mockResolvedValue({ value: [], "@odata.count": 0 });
+
+    await tool.execute("id", { query: "test", top: 999 });
+    expect(client._fetchJsonMock).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ $top: "50" }),
+      expect.any(Object),
+    );
+
+    client._fetchJsonMock.mockClear();
+    await tool.execute("id", { query: "test", top: -5 });
+    expect(client._fetchJsonMock).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ $top: "1" }),
+      expect.any(Object),
+    );
+  });
+
+  it("returns pagination info", async () => {
+    client._fetchJsonMock.mockResolvedValue({
+      value: [],
+      "@odata.count": 42,
+      "@odata.nextLink": "https://graph.microsoft.com/next",
+    });
+
+    const result = await tool.execute("id", { query: "test" });
+    const parsed = parseResult(result);
+
+    expect(parsed.data.totalCount).toBe(42);
+    expect(parsed.data.hasMore).toBe(true);
+    expect(parsed.data.nextSkip).toBe(10);
+  });
+
+  it("filter-only search includes $orderby", async () => {
+    client._fetchJsonMock.mockResolvedValue({ value: [], "@odata.count": 0 });
+
+    await tool.execute("id", { dateFrom: "2026-01-01" });
+
+    const query = client._fetchJsonMock.mock.calls[0][1];
+    expect(query.$orderby).toBe("receivedDateTime desc");
+  });
+
+  // ── Cycle 6: error handling and multi-account ─────────────────────────────
+
+  it("preserves GraphApiError category", async () => {
+    client._fetchJsonMock.mockRejectedValue(
+      new GraphApiError("Insufficient permissions", "permission", 403),
+    );
+
+    const result = await tool.execute("id", { query: "test" });
+    const parsed = parseResult(result);
+
+    expect(parsed.error.category).toBe("permission");
+    expect(parsed.error.message).toBe("Insufficient permissions");
+  });
+
+  it("sanitizes non-GraphApiError messages", async () => {
+    client._fetchJsonMock.mockRejectedValue(
+      new Error("GET https://graph.microsoft.com/v1.0/me/messages?token=secret123"),
+    );
+
+    const result = await tool.execute("id", { query: "test" });
+    const parsed = parseResult(result);
+
+    expect(parsed.error.category).toBe("transient");
+    expect(parsed.error.message).not.toContain("secret123");
+    expect(parsed.error.message).not.toContain("graph.microsoft.com");
+  });
+
+  it("routes via resolveClient when provided", async () => {
+    const altClient = createMockGraphClient();
+    altClient._fetchJsonMock.mockResolvedValue({ value: [], "@odata.count": 0 });
+
+    const resolveClient = vi.fn().mockReturnValue(altClient);
+    const tool2 = createEmailSearchTool({ graphClient: client, resolveClient });
+
+    await tool2.execute("id", { query: "test", account: "rod" });
+
+    expect(resolveClient).toHaveBeenCalledWith("email_search", "rod");
+    expect(altClient._fetchJsonMock).toHaveBeenCalled();
+    expect(client._fetchJsonMock).not.toHaveBeenCalled();
+  });
+
+  it("returns policy denial error from resolveClient", async () => {
+    const resolveClient = vi.fn().mockImplementation(() => {
+      throw new GraphApiError(
+        "Tool email_search is not permitted for account 'openclaw'. Allowed accounts: ['rod'].",
+        "user_input",
+        403,
+      );
+    });
+    const tool2 = createEmailSearchTool({ graphClient: client, resolveClient });
+
+    const result = await tool2.execute("id", { query: "test", account: "openclaw" });
+    const parsed = parseResult(result);
+
+    expect(parsed.error.category).toBe("user_input");
+    expect(parsed.error.message).toContain("not permitted");
+  });
+
+  // ── Cycle 7: KQL escaping edge cases ──────────────────────────────────────
+
+  it("escapes internal quotes in subject", async () => {
+    client._fetchJsonMock.mockResolvedValue({ value: [], "@odata.count": 0 });
+
+    await tool.execute("id", { subject: 'the "big" deal' });
+
+    const searchArg = client._fetchJsonMock.mock.calls[0][1].$search;
+    // KQL quotes the value, OData escapes the whole thing
+    expect(searchArg).toContain("subject:");
+    expect(searchArg).toContain("big");
+    expect(searchArg).toContain("deal");
+  });
+
+  it("double-escapes backslashes for OData layer", async () => {
+    client._fetchJsonMock.mockResolvedValue({ value: [], "@odata.count": 0 });
+
+    await tool.execute("id", { query: "test\\path" });
+
+    const searchArg = client._fetchJsonMock.mock.calls[0][1].$search;
+    // Backslash in query → \\ in OData
+    expect(searchArg).toContain("\\\\");
+  });
+
+  it("bare email in from is not unnecessarily quoted", async () => {
+    client._fetchJsonMock.mockResolvedValue({ value: [], "@odata.count": 0 });
+
+    await tool.execute("id", { from: "alice@test.com" });
+
+    const searchArg = client._fetchJsonMock.mock.calls[0][1].$search;
+    // Should be from:alice@test.com (no extra quotes around the email)
+    expect(searchArg).toContain("from:alice@test.com");
+  });
+
+  // ── Validation ────────────────────────────────────────────────────────────
+
+  it("rejects empty params with user_input error", async () => {
+    const result = await tool.execute("id", {});
+    const parsed = parseResult(result);
+
+    expect(parsed.error).toBeDefined();
+    expect(parsed.error.category).toBe("user_input");
+    expect(parsed.error.message).toContain("at least one search");
+  });
+});
 
 describe("multi-account tool routing", () => {
   let rodClient: ReturnType<typeof createMockGraphClient>;
