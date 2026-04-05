@@ -1,6 +1,6 @@
 import { Type } from "@sinclair/typebox";
 import type { GraphClient } from "../graph-client.js";
-import { GraphApiError, toolSuccess, toolErrorResult } from "../types.js";
+import { toolErrorResult, toolSuccessResult, catchAsToolError } from "../types.js";
 import { validateAndMapAttachments } from "./_email-shared.js";
 
 // ── Schema ──────────────────────────────────────────────────────────────────
@@ -84,22 +84,13 @@ export function createEmailReplyTool(deps: {
           body: JSON.stringify({ message }),
         });
 
-        const result = toolSuccess({
+        return toolSuccessResult({
           replied: true,
           messageId,
           replyAll,
         });
-
-        return {
-          content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
-          details: result,
-        };
       } catch (err) {
-        const category = err instanceof GraphApiError ? err.category : "transient";
-        const safeMsg = err instanceof GraphApiError
-          ? err.message
-          : "An unexpected error occurred. Check gateway logs for details.";
-        return toolErrorResult(category, safeMsg);
+        return catchAsToolError(err);
       }
     },
   };

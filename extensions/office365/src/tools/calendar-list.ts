@@ -1,7 +1,7 @@
 import { Type } from "@sinclair/typebox";
 import type { GraphClient } from "../graph-client.js";
 import type { GraphEventListResponse } from "../types.js";
-import { GraphApiError, toolSuccess, toolErrorResult } from "../types.js";
+import { toolErrorResult, toolSuccessResult, catchAsToolError } from "../types.js";
 import {
   DEFAULT_TIMEZONE,
   EVENT_SELECT_FIELDS,
@@ -123,23 +123,14 @@ export function createCalendarListTool(deps: {
           extraHeaders,
         );
 
-        const result = toolSuccess({
+        return toolSuccessResult({
           events: (data.value ?? []).map(formatEventSummary),
           totalCount: data["@odata.count"] ?? null,
           hasMore: !!data["@odata.nextLink"],
           nextSkip: data["@odata.nextLink"] ? (skip ?? 0) + top : null,
         });
-
-        return {
-          content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
-          details: result,
-        };
       } catch (err) {
-        const category = err instanceof GraphApiError ? err.category : "transient";
-        const safeMsg = err instanceof GraphApiError
-          ? err.message
-          : "An unexpected error occurred. Check gateway logs for details.";
-        return toolErrorResult(category, safeMsg);
+        return catchAsToolError(err);
       }
     },
   };

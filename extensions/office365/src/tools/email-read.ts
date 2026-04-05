@@ -1,7 +1,8 @@
 import { Type } from "@sinclair/typebox";
 import type { GraphClient } from "../graph-client.js";
 import type { AttachmentMeta, GraphMessage } from "../types.js";
-import { GraphApiError, toolSuccess, toolErrorResult } from "../types.js";
+import { toolErrorResult, toolSuccessResult, catchAsToolError } from "../types.js";
+import { formatAddress } from "./_email-shared.js";
 
 // ── Constants ───────────────────────────────────────────────────────────────
 
@@ -35,12 +36,6 @@ export const EmailReadSchema = Type.Object({
 
 const SELECT_FIELDS =
   "id,subject,from,toRecipients,ccRecipients,bccRecipients,replyTo,receivedDateTime,sentDateTime,isRead,hasAttachments,body,importance,flag,conversationId";
-
-function formatAddress(addr: GraphMessage["from"]): string {
-  if (!addr?.emailAddress) return "(unknown)";
-  const { name, address } = addr.emailAddress;
-  return name ? `${name} <${address}>` : address;
-}
 
 function extractAddresses(
   recipients: GraphMessage["toRecipients"],
@@ -138,7 +133,7 @@ export function createEmailReadTool(deps: {
         const bodyType = msg.body?.contentType ?? bodyFormat;
         const bodyUnsafeHtml = truncated && bodyType === "html" ? true : undefined;
 
-        const result = toolSuccess({
+        return toolSuccessResult({
           id: msg.id,
           subject: msg.subject ?? "(no subject)",
           from: formatAddress(msg.from),
@@ -159,17 +154,8 @@ export function createEmailReadTool(deps: {
           conversationId: msg.conversationId,
           ...(attachments && attachments.length > 0 ? { attachments } : {}),
         });
-
-        return {
-          content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
-          details: result,
-        };
       } catch (err) {
-        const category = err instanceof GraphApiError ? err.category : "transient";
-        const safeMsg = err instanceof GraphApiError
-          ? err.message
-          : "An unexpected error occurred. Check gateway logs for details.";
-        return toolErrorResult(category, safeMsg);
+        return catchAsToolError(err);
       }
     },
   };

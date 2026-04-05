@@ -1,7 +1,7 @@
 import { Type } from "@sinclair/typebox";
 import type { GraphClient } from "../graph-client.js";
 import type { GraphMessage } from "../types.js";
-import { GraphApiError, toolSuccess, toolErrorResult } from "../types.js";
+import { toolErrorResult, toolSuccessResult, catchAsToolError } from "../types.js";
 import { formatMessageSummary, resolveFolder } from "./_email-shared.js";
 
 // ── Schema ──────────────────────────────────────────────────────────────────
@@ -69,23 +69,14 @@ export function createEmailMoveTool(deps: {
 
         const moved = (await response.json()) as GraphMessage;
 
-        const result = toolSuccess({
+        return toolSuccessResult({
           moved: true,
           previousMessageId: messageId,
           newMessageId: moved.id,
           message: formatMessageSummary(moved),
         });
-
-        return {
-          content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
-          details: result,
-        };
       } catch (err) {
-        const category = err instanceof GraphApiError ? err.category : "transient";
-        const safeMsg = err instanceof GraphApiError
-          ? err.message
-          : "An unexpected error occurred. Check gateway logs for details.";
-        return toolErrorResult(category, safeMsg);
+        return catchAsToolError(err);
       }
     },
   };

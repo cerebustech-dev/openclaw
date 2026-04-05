@@ -135,7 +135,7 @@ export function resolveFolder(input: string): string | { error: string } {
   };
 }
 
-// ── Message formatting ─────────────────────────────────────────────────────
+// ── Message summary ────────────────────────────────────────────────────────
 
 export function formatMessageSummary(msg: GraphMessage) {
   return {

@@ -136,6 +136,24 @@ export function toolErrorResult(
   };
 }
 
+/** Catch-block helper: classifies errors and returns a safe tool error response. */
+export function catchAsToolError(err: unknown): ToolErrorReturn {
+  const category = err instanceof GraphApiError ? err.category : "transient";
+  const safeMsg = err instanceof GraphApiError
+    ? err.message
+    : "An unexpected error occurred. Check gateway logs for details.";
+  return toolErrorResult(category, safeMsg);
+}
+
+/** Wraps tool success data in the standard AgentToolResult envelope. */
+export function toolSuccessResult<T>(data: T) {
+  const result = toolSuccess(data);
+  return {
+    content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
+    details: result,
+  };
+}
+
 // ── Credential shape ────────────────────────────────────────────────────────
 
 export type Office365Credential = {

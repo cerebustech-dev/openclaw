@@ -1,7 +1,7 @@
 import { Type } from "@sinclair/typebox";
 import type { GraphClient } from "../graph-client.js";
 import type { GraphEvent } from "../types.js";
-import { GraphApiError, toolSuccess, toolErrorResult } from "../types.js";
+import { toolErrorResult, toolSuccessResult, catchAsToolError } from "../types.js";
 import { DEFAULT_TIMEZONE, formatEventSummary, validateDateRange, checkConflicts, formatConflictMessage } from "./_calendar-shared.js";
 
 // ── Schema ──────────────────────────────────────────────────────────────────
@@ -126,11 +126,7 @@ export function createCalendarCreateTool(deps: {
             conflictWarnings = conflictResult.conflicts;
           }
         } catch (err) {
-          const category = err instanceof GraphApiError ? err.category : "transient";
-          const safeMsg = err instanceof GraphApiError
-            ? err.message
-            : "An unexpected error occurred. Check gateway logs for details.";
-          return toolErrorResult(category, safeMsg);
+          return catchAsToolError(err);
         }
       }
 
@@ -173,22 +169,13 @@ export function createCalendarCreateTool(deps: {
         });
 
         const created = (await response.json()) as GraphEvent;
-        const result = toolSuccess({
+        return toolSuccessResult({
           created: true,
           event: formatEventSummary(created),
           ...(conflictWarnings ? { warnings: { conflictsDetected: conflictWarnings.length, conflicts: conflictWarnings } } : {}),
         });
-
-        return {
-          content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
-          details: result,
-        };
       } catch (err) {
-        const category = err instanceof GraphApiError ? err.category : "transient";
-        const safeMsg = err instanceof GraphApiError
-          ? err.message
-          : "An unexpected error occurred. Check gateway logs for details.";
-        return toolErrorResult(category, safeMsg);
+        return catchAsToolError(err);
       }
     },
   };

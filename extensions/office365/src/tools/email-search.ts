@@ -1,7 +1,7 @@
 import { Type } from "@sinclair/typebox";
 import type { GraphClient } from "../graph-client.js";
 import type { GraphListResponse } from "../types.js";
-import { GraphApiError, toolSuccess, toolErrorResult } from "../types.js";
+import { toolErrorResult, toolSuccessResult, catchAsToolError } from "../types.js";
 import { SELECT_FIELDS, formatMessageSummary } from "./_email-shared.js";
 
 // ── KQL builder ─────────────────────────────────────────────────────────────
@@ -229,23 +229,14 @@ export function createEmailSearchTool(deps: {
           Object.keys(extraHeaders).length > 0 ? extraHeaders : undefined,
         );
 
-        const result = toolSuccess({
+        return toolSuccessResult({
           messages: (data.value ?? []).map(formatMessageSummary),
           totalCount: data["@odata.count"] ?? null,
           hasMore: !!data["@odata.nextLink"],
           nextSkip: data["@odata.nextLink"] ? top : null,
         });
-
-        return {
-          content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
-          details: result,
-        };
       } catch (err) {
-        const category = err instanceof GraphApiError ? err.category : "transient";
-        const safeMsg = err instanceof GraphApiError
-          ? err.message
-          : "An unexpected error occurred. Check gateway logs for details.";
-        return toolErrorResult(category, safeMsg);
+        return catchAsToolError(err);
       }
     },
   };

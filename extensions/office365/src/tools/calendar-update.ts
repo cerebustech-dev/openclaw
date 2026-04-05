@@ -1,7 +1,7 @@
 import { Type } from "@sinclair/typebox";
 import type { GraphClient } from "../graph-client.js";
 import type { GraphEvent } from "../types.js";
-import { GraphApiError, toolSuccess, toolErrorResult } from "../types.js";
+import { toolErrorResult, toolSuccessResult, catchAsToolError } from "../types.js";
 import { DEFAULT_TIMEZONE, formatEventSummary, checkConflicts, formatConflictMessage } from "./_calendar-shared.js";
 
 // ── Schema ──────────────────────────────────────────────────────────────────
@@ -141,11 +141,7 @@ export function createCalendarUpdateTool(deps: {
             conflictWarnings = conflictResult.conflicts;
           }
         } catch (err) {
-          const category = err instanceof GraphApiError ? err.category : "transient";
-          const safeMsg = err instanceof GraphApiError
-            ? err.message
-            : "An unexpected error occurred. Check gateway logs for details.";
-          return toolErrorResult(category, safeMsg);
+          return catchAsToolError(err);
         }
       }
 
@@ -171,20 +167,11 @@ export function createCalendarUpdateTool(deps: {
         const warnings = conflictWarnings
           ? { warnings: { conflictsDetected: conflictWarnings.length, conflicts: conflictWarnings } }
           : {};
-        const result = event
-          ? toolSuccess({ updated: true, event, ...warnings })
-          : toolSuccess({ updated: true, eventId, ...warnings });
-
-        return {
-          content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
-          details: result,
-        };
+        return event
+          ? toolSuccessResult({ updated: true, event, ...warnings })
+          : toolSuccessResult({ updated: true, eventId, ...warnings });
       } catch (err) {
-        const category = err instanceof GraphApiError ? err.category : "transient";
-        const safeMsg = err instanceof GraphApiError
-          ? err.message
-          : "An unexpected error occurred. Check gateway logs for details.";
-        return toolErrorResult(category, safeMsg);
+        return catchAsToolError(err);
       }
     },
   };

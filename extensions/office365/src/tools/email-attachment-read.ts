@@ -1,7 +1,7 @@
 import { Type } from "@sinclair/typebox";
 import type { GraphClient } from "../graph-client.js";
 import type { GraphAttachment } from "../types.js";
-import { GraphApiError, toolSuccess, toolErrorResult } from "../types.js";
+import { toolErrorResult, toolSuccessResult, catchAsToolError } from "../types.js";
 
 // ── Constants ───────────────────────────────────────────────────────────────
 
@@ -80,7 +80,7 @@ export function createEmailAttachmentReadTool(deps: {
               ? "a cloud file reference (e.g. OneDrive link)"
               : "an unsupported attachment type";
 
-          const result = toolSuccess({
+          return toolSuccessResult({
             id: attachment.id,
             name: attachment.name,
             contentType: attachment.contentType,
@@ -89,17 +89,12 @@ export function createEmailAttachmentReadTool(deps: {
             attachmentType,
             note: `This attachment is ${typeLabel}. Content download is only supported for file attachments.`,
           });
-
-          return {
-            content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
-            details: result,
-          };
         }
 
         // Size guard: refuse to return content for very large attachments
         if (attachment.size > MAX_DOWNLOAD_SIZE) {
           const sizeMB = (attachment.size / (1024 * 1024)).toFixed(1);
-          const result = toolSuccess({
+          return toolSuccessResult({
             id: attachment.id,
             name: attachment.name,
             contentType: attachment.contentType,
@@ -109,14 +104,9 @@ export function createEmailAttachmentReadTool(deps: {
             tooLarge: true,
             warning: `Attachment is ${sizeMB}MB, which exceeds the 10MB download limit. Use the attachment metadata to inform the user.`,
           });
-
-          return {
-            content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
-            details: result,
-          };
         }
 
-        const result = toolSuccess({
+        return toolSuccessResult({
           id: attachment.id,
           name: attachment.name,
           contentType: attachment.contentType,
@@ -124,17 +114,8 @@ export function createEmailAttachmentReadTool(deps: {
           contentBytes: attachment.contentBytes ?? null,
           attachmentType,
         });
-
-        return {
-          content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
-          details: result,
-        };
       } catch (err) {
-        const category = err instanceof GraphApiError ? err.category : "transient";
-        const safeMsg = err instanceof GraphApiError
-          ? err.message
-          : "An unexpected error occurred. Check gateway logs for details.";
-        return toolErrorResult(category, safeMsg);
+        return catchAsToolError(err);
       }
     },
   };

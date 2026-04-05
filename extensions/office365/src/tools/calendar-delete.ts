@@ -1,6 +1,6 @@
 import { Type } from "@sinclair/typebox";
 import type { GraphClient } from "../graph-client.js";
-import { GraphApiError, toolSuccess, toolErrorResult } from "../types.js";
+import { toolErrorResult, toolSuccessResult, catchAsToolError } from "../types.js";
 
 // ── Schema ──────────────────────────────────────────────────────────────────
 
@@ -43,18 +43,9 @@ export function createCalendarDeleteTool(deps: {
           { method: "DELETE" },
         );
 
-        const result = toolSuccess({ deleted: true, eventId });
-
-        return {
-          content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
-          details: result,
-        };
+        return toolSuccessResult({ deleted: true, eventId });
       } catch (err) {
-        const category = err instanceof GraphApiError ? err.category : "transient";
-        const safeMsg = err instanceof GraphApiError
-          ? err.message
-          : "An unexpected error occurred. Check gateway logs for details.";
-        return toolErrorResult(category, safeMsg);
+        return catchAsToolError(err);
       }
     },
   };
