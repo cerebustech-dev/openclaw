@@ -98,6 +98,45 @@ export function validateAndMapAttachments(
   return { ok: true, attachments: mapped };
 }
 
+// ── Folder resolution ──────────────────────────────────────────────────────
+
+/**
+ * Resolve a user-provided folder name to a Graph API folder identifier.
+ *
+ * **Normalization**: lowercases, strips spaces/underscores/hyphens before lookup.
+ * **Known mappings**: inbox→Inbox, sent/sentitems→SentItems, drafts→Drafts,
+ *   deleted/deleteditems→DeletedItems, archive→Archive, junk/junkemail→JunkEmail.
+ * **Pass-through**: exact well-known names (e.g. "SentItems") pass through,
+ *   and any string >20 chars matching /^[A-Za-z0-9+=_-]+$/ is treated as a raw folder ID.
+ * **Error**: returns `{ error: string }` for unrecognized short strings.
+ */
+export const FOLDER_MAP: Record<string, string> = {
+  inbox: "Inbox",
+  sent: "SentItems",
+  sentitems: "SentItems",
+  drafts: "Drafts",
+  deleted: "DeletedItems",
+  deleteditems: "DeletedItems",
+  archive: "Archive",
+  junk: "JunkEmail",
+  junkemail: "JunkEmail",
+};
+
+export const KNOWN_FOLDERS = new Set(Object.values(FOLDER_MAP));
+
+export function resolveFolder(input: string): string | { error: string } {
+  const lower = input.toLowerCase().replace(/[\s_-]/g, "");
+  const mapped = FOLDER_MAP[lower];
+  if (mapped) return mapped;
+  if (KNOWN_FOLDERS.has(input)) return input;
+  if (input.length > 20 && /^[A-Za-z0-9+=_-]+$/.test(input)) return input;
+  return {
+    error: `Unknown folder '${input}'. Use: Inbox, SentItems, Drafts, DeletedItems, Archive, JunkEmail, or a folder ID.`,
+  };
+}
+
+// ── Message formatting ─────────────────────────────────────────────────────
+
 export function formatMessageSummary(msg: GraphMessage) {
   return {
     id: msg.id,

@@ -18,6 +18,7 @@ import { createCalendarListTool } from "./src/tools/calendar-list.js";
 import { createCalendarCreateTool } from "./src/tools/calendar-create.js";
 import { createCalendarUpdateTool } from "./src/tools/calendar-update.js";
 import { createCalendarDeleteTool } from "./src/tools/calendar-delete.js";
+import { createEmailMoveTool } from "./src/tools/email-move.js";
 import { GraphApiError } from "./src/types.js";
 import type { Office365AccountConfig, Office365Config } from "./src/types.js";
 import {
@@ -246,6 +247,7 @@ const office365Plugin = {
       api.registerTool(createCalendarCreateTool(toolDeps));
       api.registerTool(createCalendarUpdateTool(toolDeps));
       api.registerTool(createCalendarDeleteTool(toolDeps));
+      api.registerTool(createEmailMoveTool(toolDeps));
 
       // Multi-account prompt context
       api.on("before_prompt_build", async () => {
@@ -324,7 +326,7 @@ const office365Plugin = {
                   },
                   configPatch: {},
                   notes: [
-                    "Microsoft 365 tools are now available: email_list, email_read, email_send, email_reply, email_search, email_attachment_read, calendar_list, calendar_create, calendar_update, calendar_delete.",
+                    "Microsoft 365 tools are now available: email_list, email_read, email_send, email_reply, email_search, email_move, email_attachment_read, calendar_list, calendar_create, calendar_update, calendar_delete.",
                   ],
                 });
               } catch (err) {
@@ -364,6 +366,7 @@ const office365Plugin = {
       api.registerTool(createCalendarCreateTool({ graphClient }));
       api.registerTool(createCalendarUpdateTool({ graphClient }));
       api.registerTool(createCalendarDeleteTool({ graphClient }));
+      api.registerTool(createEmailMoveTool({ graphClient }));
 
       const credentialFile = join(stateDir, "office365-credentials.json");
 
@@ -373,7 +376,7 @@ const office365Plugin = {
         }
         return {
           prependContext:
-            "Microsoft 365 tools are available: email_list (list/search messages), email_read (read full message by ID), email_send (compose and send new email), email_reply (reply to existing email), email_search (structured search with date ranges and filters), email_attachment_read (download attachment content), calendar_list (list/query calendar events with date range support), calendar_create (create new events), calendar_update (update existing events), calendar_delete (delete events by ID).",
+            "Microsoft 365 tools are available: email_list (list/search messages), email_read (read full message by ID), email_send (compose and send new email), email_reply (reply to existing email), email_search (structured search with date ranges and filters), email_move (move messages between folders), email_attachment_read (download attachment content), calendar_list (list/query calendar events with date range support), calendar_create (create new events), calendar_update (update existing events), calendar_delete (delete events by ID).",
         };
       });
     }

@@ -10,6 +10,7 @@ const KNOWN_TOOLS = new Set([
   "email_send",
   "email_reply",
   "email_search",
+  "email_move",
   "email_attachment_read",
   "calendar_list",
   "calendar_create",

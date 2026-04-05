@@ -207,7 +207,7 @@ describe("office365Plugin.register", () => {
 
     expect(registeredProviders).toHaveLength(1);
     expect(registeredProviders[0].id).toBe("microsoft-graph");
-    expect(registeredTools).toHaveLength(10);
+    expect(registeredTools).toHaveLength(11);
   });
 
   it("registers per-account providers in multi-account mode", async () => {
@@ -240,7 +240,7 @@ describe("office365Plugin.register", () => {
     expect(providerIds).toContain("microsoft-graph-rod");
     expect(providerIds).toContain("microsoft-graph-openclaw");
     // Should still register all 4 tools
-    expect(registeredTools).toHaveLength(10);
+    expect(registeredTools).toHaveLength(11);
   });
 
   it("throws at startup for invalid multi-account config", async () => {
