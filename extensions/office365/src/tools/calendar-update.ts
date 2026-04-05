@@ -2,7 +2,7 @@ import { Type } from "@sinclair/typebox";
 import type { GraphClient } from "../graph-client.js";
 import type { GraphEvent } from "../types.js";
 import { GraphApiError, toolSuccess, toolError } from "../types.js";
-import { DEFAULT_TIMEZONE, formatEventSummary } from "./_calendar-shared.js";
+import { DEFAULT_TIMEZONE, formatEventSummary, checkConflicts, formatConflictMessage } from "./_calendar-shared.js";
 
 // ── Schema ──────────────────────────────────────────────────────────────────
 
@@ -52,6 +52,16 @@ export const CalendarUpdateSchema = Type.Object({
     Type.String({
       description:
         'Free/busy status: "free", "tentative", "busy", "oof", "workingElsewhere", "unknown".',
+    }),
+  ),
+  checkConflicts: Type.Optional(
+    Type.Boolean({
+      description: "Check for conflicting events when changing time. Default: true. Set false to skip. Only checked when both startDateTime and endDateTime are provided.",
+    }),
+  ),
+  forceUpdate: Type.Optional(
+    Type.Boolean({
+      description: "Update even if conflicts are detected. Default: false.",
     }),
   ),
 });
@@ -117,6 +127,45 @@ export function createCalendarUpdateTool(deps: {
         };
       }
 
+      // ── Conflict check (only when both dates change) ────────────────────
+      type ConflictEntry = { id: string; subject: string; start: { dateTime: string; timeZone: string } | null; end: { dateTime: string; timeZone: string } | null; showAs: string };
+      let conflictWarnings: ConflictEntry[] | undefined;
+
+      if (startDateTime && endDateTime && p.checkConflicts !== false) {
+        try {
+          const client = deps.resolveClient?.("calendar_update", account) ?? deps.graphClient;
+          const conflictResult = await checkConflicts(client, startDateTime, endDateTime, tz, eventId);
+          if (conflictResult.hasConflicts && p.forceUpdate !== true) {
+            return {
+              content: [{
+                type: "text" as const,
+                text: JSON.stringify(
+                  toolError("user_input", formatConflictMessage(
+                    conflictResult.conflicts, startDateTime, endDateTime,
+                    "forceUpdate", conflictResult.scanIncomplete,
+                  )),
+                  null, 2,
+                ),
+              }],
+            };
+          }
+          if (conflictResult.hasConflicts) {
+            conflictWarnings = conflictResult.conflicts;
+          }
+        } catch (err) {
+          const category = err instanceof GraphApiError ? err.category : "transient";
+          const safeMsg = err instanceof GraphApiError
+            ? err.message
+            : "An unexpected error occurred. Check gateway logs for details.";
+          return {
+            content: [{
+              type: "text" as const,
+              text: JSON.stringify(toolError(category, safeMsg), null, 2),
+            }],
+          };
+        }
+      }
+
       try {
         const client = deps.resolveClient?.("calendar_update", account) ?? deps.graphClient;
         const response = await client.fetch(
@@ -136,9 +185,12 @@ export function createCalendarUpdateTool(deps: {
           // No parseable body — fall through
         }
 
+        const warnings = conflictWarnings
+          ? { warnings: { conflictsDetected: conflictWarnings.length, conflicts: conflictWarnings } }
+          : {};
         const result = event
-          ? toolSuccess({ updated: true, event })
-          : toolSuccess({ updated: true, eventId });
+          ? toolSuccess({ updated: true, event, ...warnings })
+          : toolSuccess({ updated: true, eventId, ...warnings });
 
         return {
           content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],

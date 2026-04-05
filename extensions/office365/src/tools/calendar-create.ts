@@ -2,7 +2,7 @@ import { Type } from "@sinclair/typebox";
 import type { GraphClient } from "../graph-client.js";
 import type { GraphEvent } from "../types.js";
 import { GraphApiError, toolSuccess, toolError } from "../types.js";
-import { DEFAULT_TIMEZONE, formatEventSummary, validateDateRange } from "./_calendar-shared.js";
+import { DEFAULT_TIMEZONE, formatEventSummary, validateDateRange, checkConflicts, formatConflictMessage } from "./_calendar-shared.js";
 
 // ── Schema ──────────────────────────────────────────────────────────────────
 
@@ -54,6 +54,16 @@ export const CalendarCreateSchema = Type.Object({
   isOnlineMeeting: Type.Optional(
     Type.Boolean({ description: "Whether to create an online meeting link." }),
   ),
+  checkConflicts: Type.Optional(
+    Type.Boolean({
+      description: "Check for conflicting events before creating. Default: true. Set false to skip.",
+    }),
+  ),
+  forceCreate: Type.Optional(
+    Type.Boolean({
+      description: "Create even if conflicts are detected. Default: false.",
+    }),
+  ),
 });
 
 // ── Tool factory ────────────────────────────────────────────────────────────
@@ -104,6 +114,47 @@ export function createCalendarCreateTool(deps: {
 
       const tz = typeof p.timeZone === "string" ? p.timeZone.trim() : DEFAULT_TIMEZONE;
 
+      // ── Conflict check ──────────────────────────────────────────────────
+      const shouldCheck = p.checkConflicts !== false;
+      const force = p.forceCreate === true;
+      type ConflictEntry = { id: string; subject: string; start: { dateTime: string; timeZone: string } | null; end: { dateTime: string; timeZone: string } | null; showAs: string };
+      let conflictWarnings: ConflictEntry[] | undefined;
+
+      if (shouldCheck) {
+        try {
+          const client = deps.resolveClient?.("calendar_create", account) ?? deps.graphClient;
+          const conflictResult = await checkConflicts(client, startDateTime, endDateTime, tz);
+          if (conflictResult.hasConflicts && !force) {
+            return {
+              content: [{
+                type: "text" as const,
+                text: JSON.stringify(
+                  toolError("user_input", formatConflictMessage(
+                    conflictResult.conflicts, startDateTime, endDateTime,
+                    "forceCreate", conflictResult.scanIncomplete,
+                  )),
+                  null, 2,
+                ),
+              }],
+            };
+          }
+          if (conflictResult.hasConflicts) {
+            conflictWarnings = conflictResult.conflicts;
+          }
+        } catch (err) {
+          const category = err instanceof GraphApiError ? err.category : "transient";
+          const safeMsg = err instanceof GraphApiError
+            ? err.message
+            : "An unexpected error occurred. Check gateway logs for details.";
+          return {
+            content: [{
+              type: "text" as const,
+              text: JSON.stringify(toolError(category, safeMsg), null, 2),
+            }],
+          };
+        }
+      }
+
       // Build event body
       const event: Record<string, unknown> = {
         subject,
@@ -146,6 +197,7 @@ export function createCalendarCreateTool(deps: {
         const result = toolSuccess({
           created: true,
           event: formatEventSummary(created),
+          ...(conflictWarnings ? { warnings: { conflictsDetected: conflictWarnings.length, conflicts: conflictWarnings } } : {}),
         });
 
         return {

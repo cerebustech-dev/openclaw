@@ -6,7 +6,7 @@ import { createEmailSendTool } from "./src/tools/email-send.js";
 import { createEmailReplyTool } from "./src/tools/email-reply.js";
 import { createEmailSearchTool } from "./src/tools/email-search.js";
 import { GraphApiError } from "./src/types.js";
-import { formatEventSummary, validateDateRange } from "./src/tools/_calendar-shared.js";
+import { formatEventSummary, validateDateRange, checkConflicts } from "./src/tools/_calendar-shared.js";
 import { createCalendarListTool } from "./src/tools/calendar-list.js";
 import { createCalendarUpdateTool } from "./src/tools/calendar-update.js";
 import { createCalendarDeleteTool } from "./src/tools/calendar-delete.js";
@@ -2016,6 +2016,143 @@ describe("validateDateRange", () => {
   });
 });
 
+// ── checkConflicts tests ───────────────────────────────────────────────────
+
+describe("checkConflicts", () => {
+  let client: ReturnType<typeof createMockGraphClient>;
+
+  beforeEach(() => {
+    client = createMockGraphClient();
+  });
+
+  const START = "2026-04-05T09:00:00";
+  const END = "2026-04-05T10:00:00";
+  const TZ = "America/Detroit";
+
+  function makeEvent(overrides: Partial<GraphEvent> & { id: string }): GraphEvent {
+    return {
+      subject: "Test Event",
+      start: { dateTime: "2026-04-05T09:00:00", timeZone: TZ },
+      end: { dateTime: "2026-04-05T09:30:00", timeZone: TZ },
+      showAs: "busy",
+      isCancelled: false,
+      ...overrides,
+    };
+  }
+
+  it("returns empty result when no overlapping events", async () => {
+    client._fetchJsonMock.mockResolvedValue({ value: [] });
+
+    const result = await checkConflicts(client, START, END, TZ);
+
+    expect(result.hasConflicts).toBe(false);
+    expect(result.conflicts).toHaveLength(0);
+    expect(result.scanIncomplete).toBe(false);
+
+    expect(client._fetchJsonMock).toHaveBeenCalledWith(
+      "/me/calendarView",
+      expect.objectContaining({ startDateTime: START, endDateTime: END }),
+      expect.objectContaining({ Prefer: `outlook.timezone="${TZ}"` }),
+    );
+  });
+
+  it("detects event with showAs=busy as conflict", async () => {
+    client._fetchJsonMock.mockResolvedValue({
+      value: [makeEvent({ id: "evt-1", showAs: "busy" })],
+    });
+
+    const result = await checkConflicts(client, START, END, TZ);
+
+    expect(result.hasConflicts).toBe(true);
+    expect(result.conflicts).toHaveLength(1);
+    expect(result.conflicts[0].id).toBe("evt-1");
+    expect(result.conflicts[0].showAs).toBe("busy");
+    expect(result.conflicts[0].subject).toBe("Test Event");
+    expect(result.conflicts[0].start).toBeDefined();
+  });
+
+  it("detects event with showAs=oof as conflict", async () => {
+    client._fetchJsonMock.mockResolvedValue({
+      value: [makeEvent({ id: "evt-1", showAs: "oof" })],
+    });
+
+    const result = await checkConflicts(client, START, END, TZ);
+    expect(result.hasConflicts).toBe(true);
+    expect(result.conflicts[0].showAs).toBe("oof");
+  });
+
+  it("detects event with showAs=workingElsewhere as conflict", async () => {
+    client._fetchJsonMock.mockResolvedValue({
+      value: [makeEvent({ id: "evt-1", showAs: "workingElsewhere" })],
+    });
+
+    const result = await checkConflicts(client, START, END, TZ);
+    expect(result.hasConflicts).toBe(true);
+    expect(result.conflicts[0].showAs).toBe("workingElsewhere");
+  });
+
+  it("ignores event with showAs=free", async () => {
+    client._fetchJsonMock.mockResolvedValue({
+      value: [makeEvent({ id: "evt-1", showAs: "free" })],
+    });
+
+    const result = await checkConflicts(client, START, END, TZ);
+    expect(result.hasConflicts).toBe(false);
+    expect(result.conflicts).toHaveLength(0);
+  });
+
+  it("ignores event with showAs=tentative", async () => {
+    client._fetchJsonMock.mockResolvedValue({
+      value: [makeEvent({ id: "evt-1", showAs: "tentative" })],
+    });
+
+    const result = await checkConflicts(client, START, END, TZ);
+    expect(result.hasConflicts).toBe(false);
+  });
+
+  it("ignores cancelled event with showAs=busy", async () => {
+    client._fetchJsonMock.mockResolvedValue({
+      value: [makeEvent({ id: "evt-1", showAs: "busy", isCancelled: true })],
+    });
+
+    const result = await checkConflicts(client, START, END, TZ);
+    expect(result.hasConflicts).toBe(false);
+  });
+
+  it("treats missing showAs as non-conflict", async () => {
+    client._fetchJsonMock.mockResolvedValue({
+      value: [makeEvent({ id: "evt-1", showAs: undefined })],
+    });
+
+    const result = await checkConflicts(client, START, END, TZ);
+    expect(result.hasConflicts).toBe(false);
+  });
+
+  it("excludeEventId filters out the specified event", async () => {
+    client._fetchJsonMock.mockResolvedValue({
+      value: [
+        makeEvent({ id: "evt-self", showAs: "busy" }),
+        makeEvent({ id: "evt-other", showAs: "busy", subject: "Other Meeting" }),
+      ],
+    });
+
+    const result = await checkConflicts(client, START, END, TZ, "evt-self");
+    expect(result.hasConflicts).toBe(true);
+    expect(result.conflicts).toHaveLength(1);
+    expect(result.conflicts[0].id).toBe("evt-other");
+  });
+
+  it("sets scanIncomplete when @odata.nextLink present", async () => {
+    client._fetchJsonMock.mockResolvedValue({
+      value: [],
+      "@odata.nextLink": "https://graph.microsoft.com/v1.0/me/calendarView?$skip=50",
+    });
+
+    const result = await checkConflicts(client, START, END, TZ);
+    expect(result.scanIncomplete).toBe(true);
+  });
+});
+
 // ── calendar_list tests ────────────────────────────────────────────────────
 
 describe("calendar_list", () => {
@@ -2258,6 +2395,8 @@ describe("calendar_update", () => {
 
   beforeEach(() => {
     client = createMockGraphClient();
+    // Default: no conflicts (conflict check returns empty when both dates provided)
+    client._fetchJsonMock.mockResolvedValue({ value: [] });
     client._fetchMock.mockResolvedValue(
       new Response(JSON.stringify(UPDATED_EVENT), {
         status: 200,
@@ -2371,6 +2510,153 @@ describe("calendar_update", () => {
     expect(result.error.category).toBe("transient");
     expect(result.error.message).not.toContain("secret123");
   });
+
+  // ── Round 4: Update conflict detection ──────────────────────────────────
+
+  it("blocks update when both dates changed and conflicts found", async () => {
+    client._fetchJsonMock.mockResolvedValue({
+      value: [{
+        id: "evt-conflict",
+        subject: "Existing Meeting",
+        showAs: "busy",
+        start: { dateTime: "2026-04-05T14:00:00", timeZone: "America/Detroit" },
+        end: { dateTime: "2026-04-05T15:00:00", timeZone: "America/Detroit" },
+      }],
+    });
+
+    const result = parseResult(await tool.execute("id", {
+      eventId: "evt-1",
+      startDateTime: "2026-04-05T14:00:00",
+      endDateTime: "2026-04-05T15:00:00",
+    }));
+
+    expect(result.error.category).toBe("user_input");
+    expect(result.error.message).toContain("conflict");
+    // fetchMock should not have been called for PATCH — only the beforeEach default stays
+    // The conflict check should prevent the PATCH call
+    expect(client._fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("forceUpdate=true updates despite conflicts, includes warnings", async () => {
+    client._fetchJsonMock.mockResolvedValue({
+      value: [{
+        id: "evt-conflict",
+        subject: "Busy Slot",
+        showAs: "busy",
+        start: { dateTime: "2026-04-05T14:00:00", timeZone: "America/Detroit" },
+        end: { dateTime: "2026-04-05T14:30:00", timeZone: "America/Detroit" },
+      }],
+    });
+
+    const result = parseResult(await tool.execute("id", {
+      eventId: "evt-1",
+      startDateTime: "2026-04-05T14:00:00",
+      endDateTime: "2026-04-05T15:00:00",
+      forceUpdate: true,
+    }));
+
+    expect(result.data.updated).toBe(true);
+    expect(result.data.warnings).toBeDefined();
+    expect(result.data.warnings.conflictsDetected).toBe(1);
+    expect(client._fetchMock).toHaveBeenCalled();
+  });
+
+  it("conflict error message says forceUpdate (not forceCreate)", async () => {
+    client._fetchJsonMock.mockResolvedValue({
+      value: [{
+        id: "evt-c",
+        subject: "Block",
+        showAs: "busy",
+        start: { dateTime: "2026-04-05T14:00:00", timeZone: "America/Detroit" },
+        end: { dateTime: "2026-04-05T15:00:00", timeZone: "America/Detroit" },
+      }],
+    });
+
+    const result = parseResult(await tool.execute("id", {
+      eventId: "evt-1",
+      startDateTime: "2026-04-05T14:00:00",
+      endDateTime: "2026-04-05T15:00:00",
+    }));
+
+    expect(result.error.message).toContain("forceUpdate");
+    expect(result.error.message).not.toContain("forceCreate");
+  });
+
+  it("no conflict check when only subject changed", async () => {
+    const result = parseResult(await tool.execute("id", {
+      eventId: "evt-1",
+      subject: "Renamed",
+    }));
+
+    expect(result.data.updated).toBe(true);
+    expect(client._fetchJsonMock).not.toHaveBeenCalled();
+  });
+
+  it("no conflict check when only startDateTime provided", async () => {
+    const result = parseResult(await tool.execute("id", {
+      eventId: "evt-1",
+      startDateTime: "2026-04-05T14:00:00",
+    }));
+
+    expect(result.data.updated).toBe(true);
+    expect(client._fetchJsonMock).not.toHaveBeenCalled();
+  });
+
+  it("no conflict check when only endDateTime provided", async () => {
+    const result = parseResult(await tool.execute("id", {
+      eventId: "evt-1",
+      endDateTime: "2026-04-05T15:00:00",
+    }));
+
+    expect(result.data.updated).toBe(true);
+    expect(client._fetchJsonMock).not.toHaveBeenCalled();
+  });
+
+  it("excludeEventId prevents self-conflict", async () => {
+    client._fetchJsonMock.mockResolvedValue({
+      value: [{
+        id: "evt-1", // same ID as the event being updated
+        subject: "Self",
+        showAs: "busy",
+        start: { dateTime: "2026-04-05T14:00:00", timeZone: "America/Detroit" },
+        end: { dateTime: "2026-04-05T15:00:00", timeZone: "America/Detroit" },
+      }],
+    });
+
+    const result = parseResult(await tool.execute("id", {
+      eventId: "evt-1",
+      startDateTime: "2026-04-05T14:00:00",
+      endDateTime: "2026-04-05T15:00:00",
+    }));
+
+    expect(result.data.updated).toBe(true);
+  });
+
+  it("checkConflicts=false skips check when both dates provided", async () => {
+    const result = parseResult(await tool.execute("id", {
+      eventId: "evt-1",
+      startDateTime: "2026-04-05T14:00:00",
+      endDateTime: "2026-04-05T15:00:00",
+      checkConflicts: false,
+    }));
+
+    expect(result.data.updated).toBe(true);
+    expect(client._fetchJsonMock).not.toHaveBeenCalled();
+  });
+
+  it("conflict check uses correct timezone for update", async () => {
+    client._fetchJsonMock.mockResolvedValue({ value: [] });
+
+    await tool.execute("id", {
+      eventId: "evt-1",
+      startDateTime: "2026-04-05T14:00:00",
+      endDateTime: "2026-04-05T15:00:00",
+      timeZone: "Asia/Tokyo",
+    });
+
+    const preferHeader = client._fetchJsonMock.mock.calls[0][2];
+    expect(preferHeader.Prefer).toContain("Asia/Tokyo");
+  });
 });
 
 // ── calendar_delete tests ──────────────────────────────────────────────────
@@ -2447,6 +2733,8 @@ describe("calendar_create", () => {
 
   beforeEach(() => {
     client = createMockGraphClient();
+    // Default: no conflicts (conflict check returns empty)
+    client._fetchJsonMock.mockResolvedValue({ value: [] });
     client._fetchMock.mockResolvedValue(
       new Response(JSON.stringify(CREATED_EVENT), {
         status: 201,
@@ -2618,6 +2906,202 @@ describe("calendar_create", () => {
 
     expect(result.error.category).toBe("transient");
     expect(result.error.message).not.toContain("secret");
+  });
+
+  // ── Round 2: Conflict detection happy path ────────────────────────────────
+
+  it("default behavior blocks creation when conflicts found", async () => {
+    client._fetchJsonMock.mockResolvedValue({
+      value: [{
+        id: "evt-conflict",
+        subject: "Existing Meeting",
+        start: { dateTime: "2026-04-05T09:00:00", timeZone: "America/Detroit" },
+        end: { dateTime: "2026-04-05T10:00:00", timeZone: "America/Detroit" },
+        showAs: "busy",
+        isCancelled: false,
+      }],
+    });
+
+    const result = parseResult(await tool.execute("id", {
+      subject: "New Meeting",
+      startDateTime: "2026-04-05T09:00:00",
+      endDateTime: "2026-04-05T10:00:00",
+    }));
+
+    expect(result.error.category).toBe("user_input");
+    expect(result.error.message).toContain("conflict");
+    expect(result.error.message).toContain("Existing Meeting");
+    expect(client._fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("forceCreate=true creates despite conflicts, includes warnings", async () => {
+    client._fetchJsonMock.mockResolvedValue({
+      value: [{
+        id: "evt-conflict",
+        subject: "Busy Event",
+        start: { dateTime: "2026-04-05T09:00:00", timeZone: "America/Detroit" },
+        end: { dateTime: "2026-04-05T09:30:00", timeZone: "America/Detroit" },
+        showAs: "busy",
+      }],
+    });
+
+    const result = parseResult(await tool.execute("id", {
+      subject: "New Meeting",
+      startDateTime: "2026-04-05T09:00:00",
+      endDateTime: "2026-04-05T10:00:00",
+      forceCreate: true,
+    }));
+
+    expect(result.data.created).toBe(true);
+    expect(result.data.warnings).toBeDefined();
+    expect(result.data.warnings.conflictsDetected).toBe(1);
+    expect(result.data.warnings.conflicts[0].subject).toBe("Busy Event");
+    expect(client._fetchMock).toHaveBeenCalled();
+  });
+
+  it("checkConflicts=false skips check entirely", async () => {
+    const result = parseResult(await tool.execute("id", {
+      subject: "Quick Meeting",
+      startDateTime: "2026-04-05T09:00:00",
+      endDateTime: "2026-04-05T10:00:00",
+      checkConflicts: false,
+    }));
+
+    expect(result.data.created).toBe(true);
+    expect(client._fetchJsonMock).not.toHaveBeenCalled();
+  });
+
+  it("creates normally when no conflicts found", async () => {
+    client._fetchJsonMock.mockResolvedValue({ value: [] });
+
+    const result = parseResult(await tool.execute("id", {
+      subject: "Free Slot Meeting",
+      startDateTime: "2026-04-05T09:00:00",
+      endDateTime: "2026-04-05T10:00:00",
+    }));
+
+    expect(result.data.created).toBe(true);
+    expect(result.data.warnings).toBeUndefined();
+    expect(client._fetchJsonMock).toHaveBeenCalled();
+    expect(client._fetchMock).toHaveBeenCalled();
+  });
+
+  it("conflict error message includes event time and forceCreate hint", async () => {
+    client._fetchJsonMock.mockResolvedValue({
+      value: [{
+        id: "evt-c",
+        subject: "Block",
+        start: { dateTime: "2026-04-05T09:15:00", timeZone: "America/Detroit" },
+        end: { dateTime: "2026-04-05T09:45:00", timeZone: "America/Detroit" },
+        showAs: "busy",
+      }],
+    });
+
+    const result = parseResult(await tool.execute("id", {
+      subject: "Test",
+      startDateTime: "2026-04-05T09:00:00",
+      endDateTime: "2026-04-05T10:00:00",
+    }));
+
+    expect(result.error.message).toContain("09:15:00");
+    expect(result.error.message).toContain("forceCreate");
+  });
+
+  it("Graph API error during conflict check propagates", async () => {
+    client._fetchJsonMock.mockRejectedValue(
+      new GraphApiError("Throttled", "throttle", 429),
+    );
+
+    const result = parseResult(await tool.execute("id", {
+      subject: "Test",
+      startDateTime: "2026-04-05T09:00:00",
+      endDateTime: "2026-04-05T10:00:00",
+    }));
+
+    expect(result.error.category).toBe("throttle");
+    expect(client._fetchMock).not.toHaveBeenCalled();
+  });
+
+  // ── Round 3: Conflict edge cases ──────────────────────────────────────────
+
+  it("multiple conflicts listed in error message", async () => {
+    client._fetchJsonMock.mockResolvedValue({
+      value: [
+        { id: "e1", subject: "Meeting A", showAs: "busy", start: { dateTime: "2026-04-05T09:00:00", timeZone: "America/Detroit" }, end: { dateTime: "2026-04-05T09:30:00", timeZone: "America/Detroit" } },
+        { id: "e2", subject: "Meeting B", showAs: "busy", start: { dateTime: "2026-04-05T09:30:00", timeZone: "America/Detroit" }, end: { dateTime: "2026-04-05T10:00:00", timeZone: "America/Detroit" } },
+        { id: "e3", subject: "Meeting C", showAs: "oof", start: { dateTime: "2026-04-05T09:00:00", timeZone: "America/Detroit" }, end: { dateTime: "2026-04-05T10:00:00", timeZone: "America/Detroit" } },
+      ],
+    });
+
+    const result = parseResult(await tool.execute("id", {
+      subject: "Test",
+      startDateTime: "2026-04-05T09:00:00",
+      endDateTime: "2026-04-05T10:00:00",
+    }));
+
+    expect(result.error.message).toContain("3 conflicting");
+  });
+
+  it("mixed showAs — only conflicting statuses in warnings", async () => {
+    client._fetchJsonMock.mockResolvedValue({
+      value: [
+        { id: "e1", subject: "Busy", showAs: "busy", start: { dateTime: "2026-04-05T09:00:00", timeZone: "America/Detroit" }, end: { dateTime: "2026-04-05T09:30:00", timeZone: "America/Detroit" } },
+        { id: "e2", subject: "Free", showAs: "free", start: { dateTime: "2026-04-05T09:00:00", timeZone: "America/Detroit" }, end: { dateTime: "2026-04-05T09:30:00", timeZone: "America/Detroit" } },
+        { id: "e3", subject: "OOF", showAs: "oof", start: { dateTime: "2026-04-05T09:00:00", timeZone: "America/Detroit" }, end: { dateTime: "2026-04-05T09:30:00", timeZone: "America/Detroit" } },
+      ],
+    });
+
+    const result = parseResult(await tool.execute("id", {
+      subject: "Test",
+      startDateTime: "2026-04-05T09:00:00",
+      endDateTime: "2026-04-05T10:00:00",
+      forceCreate: true,
+    }));
+
+    expect(result.data.warnings.conflictsDetected).toBe(2);
+    expect(result.data.warnings.conflicts.map((c: any) => c.subject)).toEqual(["Busy", "OOF"]);
+  });
+
+  it("conflict check uses specified timezone in Prefer header", async () => {
+    client._fetchJsonMock.mockResolvedValue({ value: [] });
+
+    await tool.execute("id", {
+      subject: "London Meeting",
+      startDateTime: "2026-04-05T09:00:00",
+      endDateTime: "2026-04-05T10:00:00",
+      timeZone: "Europe/London",
+    });
+
+    const preferHeader = client._fetchJsonMock.mock.calls[0][2];
+    expect(preferHeader.Prefer).toContain("Europe/London");
+  });
+
+  it("conflict check uses default timezone when omitted", async () => {
+    client._fetchJsonMock.mockResolvedValue({ value: [] });
+
+    await tool.execute("id", {
+      subject: "Default TZ",
+      startDateTime: "2026-04-05T09:00:00",
+      endDateTime: "2026-04-05T10:00:00",
+    });
+
+    const preferHeader = client._fetchJsonMock.mock.calls[0][2];
+    expect(preferHeader.Prefer).toContain("America/Detroit");
+  });
+
+  it("boundary adjacency: event ending at proposed start is not a conflict", async () => {
+    // Graph calendarView returns events that overlap the window.
+    // An event ending exactly when the new one starts should not appear in results.
+    client._fetchJsonMock.mockResolvedValue({ value: [] });
+
+    const result = parseResult(await tool.execute("id", {
+      subject: "After Adjacent",
+      startDateTime: "2026-04-05T10:00:00",
+      endDateTime: "2026-04-05T11:00:00",
+    }));
+
+    expect(result.data.created).toBe(true);
+    expect(result.data.warnings).toBeUndefined();
   });
 });
 
