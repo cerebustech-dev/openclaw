@@ -11,6 +11,7 @@ import { createCalendarListTool } from "./src/tools/calendar-list.js";
 import { createCalendarUpdateTool } from "./src/tools/calendar-update.js";
 import { createCalendarDeleteTool } from "./src/tools/calendar-delete.js";
 import { createCalendarCreateTool } from "./src/tools/calendar-create.js";
+import { createEmailAttachmentReadTool } from "./src/tools/email-attachment-read.js";
 import type { GraphEvent } from "./src/types.js";
 
 // ── Mock Graph client ───────────────────────────────────────────────────────
@@ -704,6 +705,267 @@ describe("email_send", () => {
     expect(parsed.error.message).not.toContain("secret123");
     expect(parsed.error.message).not.toContain("graph.microsoft.com");
   });
+
+  // ── Round 3: Send with attachments ────────────────────────────────────────
+
+  it("sends email with single attachment", async () => {
+    client._fetchMock.mockResolvedValue(new Response("", { status: 202 }));
+
+    const result = await tool.execute("id", {
+      to: "alice@example.com",
+      subject: "Report",
+      body: "<p>See attached</p>",
+      attachments: [{
+        name: "report.pdf",
+        contentType: "application/pdf",
+        contentBytes: "SGVsbG8=",
+      }],
+    });
+    const parsed = parseResult(result);
+
+    expect(parsed.data.sent).toBe(true);
+
+    const callBody = JSON.parse(client._fetchMock.mock.calls[0][1].body);
+    expect(callBody.message.attachments).toHaveLength(1);
+    expect(callBody.message.attachments[0]["@odata.type"]).toBe("#microsoft.graph.fileAttachment");
+    expect(callBody.message.attachments[0].name).toBe("report.pdf");
+    expect(callBody.message.attachments[0].contentType).toBe("application/pdf");
+    expect(callBody.message.attachments[0].contentBytes).toBe("SGVsbG8=");
+  });
+
+  it("sends email with multiple attachments", async () => {
+    client._fetchMock.mockResolvedValue(new Response("", { status: 202 }));
+
+    const attachments = [
+      { name: "a.txt", contentType: "text/plain", contentBytes: "YQ==" },
+      { name: "b.txt", contentType: "text/plain", contentBytes: "Yg==" },
+      { name: "c.txt", contentType: "text/plain", contentBytes: "Yw==" },
+    ];
+
+    await tool.execute("id", {
+      to: "alice@example.com",
+      subject: "Files",
+      body: "<p>3 files</p>",
+      attachments,
+    });
+
+    const callBody = JSON.parse(client._fetchMock.mock.calls[0][1].body);
+    expect(callBody.message.attachments).toHaveLength(3);
+  });
+
+  it("omits attachments from request when not provided", async () => {
+    client._fetchMock.mockResolvedValue(new Response("", { status: 202 }));
+
+    await tool.execute("id", {
+      to: "alice@example.com",
+      subject: "No attach",
+      body: "<p>Hello</p>",
+    });
+
+    const callBody = JSON.parse(client._fetchMock.mock.calls[0][1].body);
+    expect(callBody.message.attachments).toBeUndefined();
+  });
+
+  it("omits attachments from request when empty array", async () => {
+    client._fetchMock.mockResolvedValue(new Response("", { status: 202 }));
+
+    await tool.execute("id", {
+      to: "alice@example.com",
+      subject: "Empty",
+      body: "<p>Hello</p>",
+      attachments: [],
+    });
+
+    const callBody = JSON.parse(client._fetchMock.mock.calls[0][1].body);
+    expect(callBody.message.attachments).toBeUndefined();
+  });
+
+  // ── Round 4: Send attachment edge cases ────────────────────────────────────
+
+  it("returns error when attachment exceeds 3MB (decoded)", async () => {
+    // 4MB base64 ≈ 3MB decoded. Create something clearly over 3MB decoded.
+    const oversized = "A".repeat(4_200_000); // ~3.15MB decoded
+    const result = parseResult(await tool.execute("id", {
+      to: "alice@example.com",
+      subject: "Big",
+      body: "<p>Too big</p>",
+      attachments: [{ name: "big.bin", contentType: "application/octet-stream", contentBytes: oversized }],
+    }));
+
+    expect(result.error.category).toBe("user_input");
+    expect(result.error.message).toContain("3MB");
+  });
+
+  it("allows attachment exactly at 3MB boundary", async () => {
+    client._fetchMock.mockResolvedValue(new Response("", { status: 202 }));
+    // 3MB = 3145728 bytes. In base64: ceil(3145728 / 3) * 4 = 4194304 chars
+    const exactly3mb = "A".repeat(4_194_304);
+
+    const result = parseResult(await tool.execute("id", {
+      to: "alice@example.com",
+      subject: "Exact",
+      body: "<p>Exactly 3MB</p>",
+      attachments: [{ name: "exact.bin", contentType: "application/octet-stream", contentBytes: exactly3mb }],
+    }));
+
+    expect(result.data.sent).toBe(true);
+  });
+
+  it("returns error when attachment missing name", async () => {
+    const result = parseResult(await tool.execute("id", {
+      to: "alice@example.com",
+      subject: "No name",
+      body: "<p>Missing</p>",
+      attachments: [{ contentType: "text/plain", contentBytes: "dGVzdA==" }],
+    }));
+
+    expect(result.error.category).toBe("user_input");
+    expect(result.error.message).toContain("name");
+  });
+
+  it("returns error when attachment missing contentBytes", async () => {
+    const result = parseResult(await tool.execute("id", {
+      to: "alice@example.com",
+      subject: "No bytes",
+      body: "<p>Missing</p>",
+      attachments: [{ name: "file.txt", contentType: "text/plain" }],
+    }));
+
+    expect(result.error.category).toBe("user_input");
+    expect(result.error.message).toContain("contentBytes");
+  });
+
+  it("returns error when attachment missing contentType", async () => {
+    const result = parseResult(await tool.execute("id", {
+      to: "alice@example.com",
+      subject: "No type",
+      body: "<p>Missing</p>",
+      attachments: [{ name: "file.txt", contentBytes: "dGVzdA==" }],
+    }));
+
+    expect(result.error.category).toBe("user_input");
+    expect(result.error.message).toContain("contentType");
+  });
+
+  it("returns error for whitespace-only name", async () => {
+    const result = parseResult(await tool.execute("id", {
+      to: "alice@example.com",
+      subject: "WS name",
+      body: "<p>Bad</p>",
+      attachments: [{ name: "   ", contentType: "text/plain", contentBytes: "dGVzdA==" }],
+    }));
+
+    expect(result.error.category).toBe("user_input");
+    expect(result.error.message).toContain("name");
+  });
+
+  it("returns error for whitespace-only contentType", async () => {
+    const result = parseResult(await tool.execute("id", {
+      to: "alice@example.com",
+      subject: "WS type",
+      body: "<p>Bad</p>",
+      attachments: [{ name: "file.txt", contentType: "  ", contentBytes: "dGVzdA==" }],
+    }));
+
+    expect(result.error.category).toBe("user_input");
+    expect(result.error.message).toContain("contentType");
+  });
+
+  it("returns error for whitespace-only contentBytes", async () => {
+    const result = parseResult(await tool.execute("id", {
+      to: "alice@example.com",
+      subject: "WS bytes",
+      body: "<p>Bad</p>",
+      attachments: [{ name: "file.txt", contentType: "text/plain", contentBytes: "   " }],
+    }));
+
+    expect(result.error.category).toBe("user_input");
+    expect(result.error.message).toContain("contentBytes");
+  });
+
+  it("returns error when too many attachments (>10)", async () => {
+    const attachments = Array.from({ length: 11 }, (_, i) => ({
+      name: `file${i}.txt`,
+      contentType: "text/plain",
+      contentBytes: "dGVzdA==",
+    }));
+
+    const result = parseResult(await tool.execute("id", {
+      to: "alice@example.com",
+      subject: "Too many",
+      body: "<p>Overflow</p>",
+      attachments,
+    }));
+
+    expect(result.error.category).toBe("user_input");
+    expect(result.error.message).toContain("10");
+  });
+
+  it("allows exactly 10 attachments", async () => {
+    client._fetchMock.mockResolvedValue(new Response("", { status: 202 }));
+
+    const attachments = Array.from({ length: 10 }, (_, i) => ({
+      name: `file${i}.txt`,
+      contentType: "text/plain",
+      contentBytes: "dGVzdA==",
+    }));
+
+    const result = parseResult(await tool.execute("id", {
+      to: "alice@example.com",
+      subject: "Max",
+      body: "<p>10 files</p>",
+      attachments,
+    }));
+
+    expect(result.data.sent).toBe(true);
+    const callBody = JSON.parse(client._fetchMock.mock.calls[0][1].body);
+    expect(callBody.message.attachments).toHaveLength(10);
+  });
+
+  it("sends with attachments + cc + bcc combined", async () => {
+    client._fetchMock.mockResolvedValue(new Response("", { status: 202 }));
+
+    await tool.execute("id", {
+      to: "alice@example.com",
+      subject: "Combined",
+      body: "<p>All fields</p>",
+      cc: ["bob@example.com"],
+      bcc: ["charlie@example.com"],
+      attachments: [{ name: "doc.pdf", contentType: "application/pdf", contentBytes: "AAAA" }],
+    });
+
+    const callBody = JSON.parse(client._fetchMock.mock.calls[0][1].body);
+    expect(callBody.message.attachments).toHaveLength(1);
+    expect(callBody.message.ccRecipients).toHaveLength(1);
+    expect(callBody.message.bccRecipients).toHaveLength(1);
+  });
+
+  it("validates all attachments before sending", async () => {
+    const result = parseResult(await tool.execute("id", {
+      to: "alice@example.com",
+      subject: "Partial",
+      body: "<p>First good, second bad</p>",
+      attachments: [
+        { name: "good.txt", contentType: "text/plain", contentBytes: "dGVzdA==" },
+        { contentType: "text/plain", contentBytes: "dGVzdA==" }, // missing name
+      ],
+    }));
+
+    expect(result.error.category).toBe("user_input");
+    expect(client._fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("returns error for invalid base64 payload", async () => {
+    const result = parseResult(await tool.execute("id", {
+      to: "alice@example.com",
+      subject: "Bad b64",
+      body: "<p>Invalid</p>",
+      attachments: [{ name: "file.txt", contentType: "text/plain", contentBytes: "not!valid!base64!!!" }],
+    }));
+
+    expect(result.error.category).toBe("user_input");
+    expect(result.error.message).toContain("base64");
+  });
 });
 
 // ── email_reply tests ──────────────────────────────────────────────────────
@@ -849,6 +1111,124 @@ describe("email_reply", () => {
     expect(parsed.error).toBeDefined();
     expect(parsed.error.message).not.toContain("secret123");
     expect(parsed.error.message).not.toContain("graph.microsoft.com");
+  });
+
+  // ── Round 5: Reply with attachments ────────────────────────────────────────
+
+  it("replies with single attachment", async () => {
+    client._fetchMock.mockResolvedValue(new Response("", { status: 202 }));
+
+    const result = parseResult(await tool.execute("id", {
+      messageId: "msg-1",
+      body: "<p>See attached</p>",
+      attachments: [{
+        name: "notes.pdf",
+        contentType: "application/pdf",
+        contentBytes: "SGVsbG8=",
+      }],
+    }));
+
+    expect(result.data.replied).toBe(true);
+
+    const callBody = JSON.parse(client._fetchMock.mock.calls[0][1].body);
+    expect(callBody.message.attachments).toHaveLength(1);
+    expect(callBody.message.attachments[0]["@odata.type"]).toBe("#microsoft.graph.fileAttachment");
+    expect(callBody.message.attachments[0].name).toBe("notes.pdf");
+    expect(client._fetchMock.mock.calls[0][0]).toContain("/reply");
+  });
+
+  it("replyAll with attachments", async () => {
+    client._fetchMock.mockResolvedValue(new Response("", { status: 202 }));
+
+    await tool.execute("id", {
+      messageId: "msg-1",
+      body: "<p>All see this</p>",
+      replyAll: true,
+      attachments: [{ name: "file.txt", contentType: "text/plain", contentBytes: "dGVzdA==" }],
+    });
+
+    const calledPath = client._fetchMock.mock.calls[0][0] as string;
+    expect(calledPath).toContain("/replyAll");
+    const callBody = JSON.parse(client._fetchMock.mock.calls[0][1].body);
+    expect(callBody.message.attachments).toHaveLength(1);
+  });
+
+  it("omits attachments when not provided (legacy format preserved)", async () => {
+    client._fetchMock.mockResolvedValue(new Response("", { status: 202 }));
+
+    await tool.execute("id", {
+      messageId: "msg-1",
+      body: "<p>No attachments</p>",
+    });
+
+    const callBody = JSON.parse(client._fetchMock.mock.calls[0][1].body);
+    expect(callBody.message.attachments).toBeUndefined();
+    expect(callBody.message.body).toEqual({ contentType: "HTML", content: "<p>No attachments</p>" });
+  });
+
+  it("omits attachments when empty array", async () => {
+    client._fetchMock.mockResolvedValue(new Response("", { status: 202 }));
+
+    await tool.execute("id", {
+      messageId: "msg-1",
+      body: "<p>Empty array</p>",
+      attachments: [],
+    });
+
+    const callBody = JSON.parse(client._fetchMock.mock.calls[0][1].body);
+    expect(callBody.message.attachments).toBeUndefined();
+  });
+
+  it("returns error when reply attachment exceeds 3MB", async () => {
+    const oversized = "A".repeat(4_200_000);
+    const result = parseResult(await tool.execute("id", {
+      messageId: "msg-1",
+      body: "<p>Too big</p>",
+      attachments: [{ name: "big.bin", contentType: "application/octet-stream", contentBytes: oversized }],
+    }));
+
+    expect(result.error.category).toBe("user_input");
+    expect(result.error.message).toContain("3MB");
+    expect(client._fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("returns error when reply attachment missing name", async () => {
+    const result = parseResult(await tool.execute("id", {
+      messageId: "msg-1",
+      body: "<p>Missing name</p>",
+      attachments: [{ contentType: "text/plain", contentBytes: "dGVzdA==" }],
+    }));
+
+    expect(result.error.category).toBe("user_input");
+    expect(result.error.message).toContain("name");
+  });
+
+  it("returns error when too many reply attachments", async () => {
+    const attachments = Array.from({ length: 11 }, (_, i) => ({
+      name: `file${i}.txt`,
+      contentType: "text/plain",
+      contentBytes: "dGVzdA==",
+    }));
+
+    const result = parseResult(await tool.execute("id", {
+      messageId: "msg-1",
+      body: "<p>Too many</p>",
+      attachments,
+    }));
+
+    expect(result.error.category).toBe("user_input");
+    expect(result.error.message).toContain("10");
+  });
+
+  it("returns error for invalid base64 in reply attachment", async () => {
+    const result = parseResult(await tool.execute("id", {
+      messageId: "msg-1",
+      body: "<p>Bad base64</p>",
+      attachments: [{ name: "file.txt", contentType: "text/plain", contentBytes: "not!valid!base64!!!" }],
+    }));
+
+    expect(result.error.category).toBe("user_input");
+    expect(result.error.message).toContain("base64");
   });
 });
 
@@ -2238,5 +2618,311 @@ describe("calendar_create", () => {
 
     expect(result.error.category).toBe("transient");
     expect(result.error.message).not.toContain("secret");
+  });
+});
+
+// ── email_attachment_read tests ────────────────────────────────────────────
+
+describe("email_attachment_read", () => {
+  let client: ReturnType<typeof createMockGraphClient>;
+  let tool: ReturnType<typeof createEmailAttachmentReadTool>;
+
+  beforeEach(() => {
+    client = createMockGraphClient();
+    tool = createEmailAttachmentReadTool({ graphClient: client });
+  });
+
+  // ── Round 1: Happy path ─────────────────────────────────────────────────
+
+  it("downloads file attachment by messageId and attachmentId", async () => {
+    client._fetchJsonMock.mockResolvedValue({
+      "@odata.type": "#microsoft.graph.fileAttachment",
+      id: "att-1",
+      name: "report.pdf",
+      contentType: "application/pdf",
+      size: 12345,
+      contentBytes: "SGVsbG8=",
+    });
+
+    const result = await tool.execute("id", {
+      messageId: "msg-1",
+      attachmentId: "att-1",
+    });
+    const parsed = parseResult(result);
+
+    expect(parsed.data.id).toBe("att-1");
+    expect(parsed.data.name).toBe("report.pdf");
+    expect(parsed.data.contentType).toBe("application/pdf");
+    expect(parsed.data.size).toBe(12345);
+    expect(parsed.data.contentBytes).toBe("SGVsbG8=");
+    expect(parsed.data.attachmentType).toBe("file");
+    expect(parsed.error).toBeUndefined();
+
+    expect(client._fetchJsonMock).toHaveBeenCalledWith(
+      "/me/messages/msg-1/attachments/att-1",
+    );
+  });
+
+  it("encodes messageId and attachmentId in URL path", async () => {
+    client._fetchJsonMock.mockResolvedValue({
+      "@odata.type": "#microsoft.graph.fileAttachment",
+      id: "att/+id=",
+      name: "file.txt",
+      contentType: "text/plain",
+      size: 100,
+      contentBytes: "dGVzdA==",
+    });
+
+    await tool.execute("id", {
+      messageId: "AAMkAD+special/chars=",
+      attachmentId: "att/+id=",
+    });
+
+    const calledPath = client._fetchJsonMock.mock.calls[0][0] as string;
+    expect(calledPath).toContain(encodeURIComponent("AAMkAD+special/chars="));
+    expect(calledPath).toContain(encodeURIComponent("att/+id="));
+  });
+
+  it("returns content and details shape", async () => {
+    client._fetchJsonMock.mockResolvedValue({
+      "@odata.type": "#microsoft.graph.fileAttachment",
+      id: "att-1",
+      name: "file.txt",
+      contentType: "text/plain",
+      size: 10,
+      contentBytes: "dGVzdA==",
+    });
+
+    const result = await tool.execute("id", {
+      messageId: "msg-1",
+      attachmentId: "att-1",
+    });
+
+    expect(result.content[0].type).toBe("text");
+    expect(result.details).toBeDefined();
+    expect(result.details!.schemaVersion).toBe(1);
+  });
+
+  // ── Round 2: Edge cases ─────────────────────────────────────────────────
+
+  it("returns user_input error for empty messageId", async () => {
+    const result = parseResult(
+      await tool.execute("id", { messageId: "", attachmentId: "att-1" }),
+    );
+    expect(result.error.category).toBe("user_input");
+    expect(result.error.message).toContain("messageId");
+  });
+
+  it("returns user_input error for missing attachmentId", async () => {
+    const result = parseResult(
+      await tool.execute("id", { messageId: "msg-1" }),
+    );
+    expect(result.error.category).toBe("user_input");
+    expect(result.error.message).toContain("attachmentId");
+  });
+
+  it("returns user_input error for whitespace-only attachmentId", async () => {
+    const result = parseResult(
+      await tool.execute("id", { messageId: "msg-1", attachmentId: "  " }),
+    );
+    expect(result.error.category).toBe("user_input");
+    expect(result.error.message).toContain("attachmentId");
+  });
+
+  it("returns not_found error when attachment 404s", async () => {
+    client._fetchJsonMock.mockRejectedValue(
+      new GraphApiError("Attachment not found.", "not_found", 404),
+    );
+
+    const result = parseResult(
+      await tool.execute("id", { messageId: "msg-1", attachmentId: "att-gone" }),
+    );
+    expect(result.error.category).toBe("not_found");
+  });
+
+  it("returns not_found error when message 404s", async () => {
+    client._fetchJsonMock.mockRejectedValue(
+      new GraphApiError("Message not found.", "not_found", 404),
+    );
+
+    const result = parseResult(
+      await tool.execute("id", { messageId: "msg-gone", attachmentId: "att-1" }),
+    );
+    expect(result.error.category).toBe("not_found");
+  });
+
+  it("returns metadata-only with tooLarge flag for oversized attachments", async () => {
+    client._fetchJsonMock.mockResolvedValue({
+      "@odata.type": "#microsoft.graph.fileAttachment",
+      id: "att-big",
+      name: "huge.zip",
+      contentType: "application/zip",
+      size: 15_000_000,
+      contentBytes: "AAAA",
+    });
+
+    const result = parseResult(
+      await tool.execute("id", { messageId: "msg-1", attachmentId: "att-big" }),
+    );
+    expect(result.data.contentBytes).toBeNull();
+    expect(result.data.tooLarge).toBe(true);
+    expect(result.data.warning).toContain("10MB");
+  });
+
+  it("allows attachment exactly at 10MB size limit", async () => {
+    client._fetchJsonMock.mockResolvedValue({
+      "@odata.type": "#microsoft.graph.fileAttachment",
+      id: "att-10mb",
+      name: "exact.bin",
+      contentType: "application/octet-stream",
+      size: 10 * 1024 * 1024,
+      contentBytes: "AAAA",
+    });
+
+    const result = parseResult(
+      await tool.execute("id", { messageId: "msg-1", attachmentId: "att-10mb" }),
+    );
+    expect(result.data.contentBytes).toBe("AAAA");
+    expect(result.data.tooLarge).toBeUndefined();
+  });
+
+  it("handles itemAttachment type (info-only)", async () => {
+    client._fetchJsonMock.mockResolvedValue({
+      "@odata.type": "#microsoft.graph.itemAttachment",
+      id: "att-item",
+      name: "Forwarded.eml",
+      contentType: "message/rfc822",
+      size: 5000,
+    });
+
+    const result = parseResult(
+      await tool.execute("id", { messageId: "msg-1", attachmentId: "att-item" }),
+    );
+    expect(result.data.attachmentType).toBe("item");
+    expect(result.data.contentBytes).toBeNull();
+    expect(result.data.note).toBeDefined();
+  });
+
+  it("handles referenceAttachment type (info-only)", async () => {
+    client._fetchJsonMock.mockResolvedValue({
+      "@odata.type": "#microsoft.graph.referenceAttachment",
+      id: "att-ref",
+      name: "OneDriveDoc.docx",
+      contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      size: 0,
+    });
+
+    const result = parseResult(
+      await tool.execute("id", { messageId: "msg-1", attachmentId: "att-ref" }),
+    );
+    expect(result.data.attachmentType).toBe("reference");
+    expect(result.data.contentBytes).toBeNull();
+    expect(result.data.note).toBeDefined();
+  });
+
+  it("handles unknown @odata.type with missing contentBytes", async () => {
+    client._fetchJsonMock.mockResolvedValue({
+      "@odata.type": "#microsoft.graph.someFutureType",
+      id: "att-future",
+      name: "mystery.dat",
+      contentType: "application/octet-stream",
+      size: 100,
+    });
+
+    const result = parseResult(
+      await tool.execute("id", { messageId: "msg-1", attachmentId: "att-future" }),
+    );
+    expect(result.data.attachmentType).toBe("unknown");
+    expect(result.data.contentBytes).toBeNull();
+    expect(result.data.note).toBeDefined();
+  });
+
+  it("handles missing contentBytes gracefully on fileAttachment", async () => {
+    client._fetchJsonMock.mockResolvedValue({
+      "@odata.type": "#microsoft.graph.fileAttachment",
+      id: "att-empty",
+      name: "empty.txt",
+      contentType: "text/plain",
+      size: 0,
+    });
+
+    const result = parseResult(
+      await tool.execute("id", { messageId: "msg-1", attachmentId: "att-empty" }),
+    );
+    expect(result.data.contentBytes).toBeNull();
+    expect(result.data.attachmentType).toBe("file");
+    expect(result.error).toBeUndefined();
+  });
+
+  it("size guard takes precedence over contentBytes for large fileAttachment", async () => {
+    client._fetchJsonMock.mockResolvedValue({
+      "@odata.type": "#microsoft.graph.fileAttachment",
+      id: "att-huge",
+      name: "big.bin",
+      contentType: "application/octet-stream",
+      size: 15_000_000,
+      contentBytes: "AAAA".repeat(1000),
+    });
+
+    const result = parseResult(
+      await tool.execute("id", { messageId: "msg-1", attachmentId: "att-huge" }),
+    );
+    expect(result.data.contentBytes).toBeNull();
+    expect(result.data.tooLarge).toBe(true);
+  });
+
+  it("sanitizes non-GraphApiError messages", async () => {
+    client._fetchJsonMock.mockRejectedValue(
+      new Error("GET https://graph.microsoft.com/v1.0/me/messages/abc?token=secret"),
+    );
+
+    const result = parseResult(
+      await tool.execute("id", { messageId: "msg-1", attachmentId: "att-1" }),
+    );
+    expect(result.error.category).toBe("transient");
+    expect(result.error.message).not.toContain("secret");
+    expect(result.error.message).not.toContain("graph.microsoft.com");
+  });
+
+  it("routes via resolveClient when account provided", async () => {
+    const altClient = createMockGraphClient();
+    altClient._fetchJsonMock.mockResolvedValue({
+      "@odata.type": "#microsoft.graph.fileAttachment",
+      id: "att-1",
+      name: "file.txt",
+      contentType: "text/plain",
+      size: 10,
+      contentBytes: "dGVzdA==",
+    });
+
+    const resolveClient = vi.fn().mockReturnValue(altClient);
+    const tool2 = createEmailAttachmentReadTool({ graphClient: client, resolveClient });
+
+    await tool2.execute("id", {
+      messageId: "msg-1",
+      attachmentId: "att-1",
+      account: "rod",
+    });
+
+    expect(resolveClient).toHaveBeenCalledWith("email_attachment_read", "rod");
+    expect(altClient._fetchJsonMock).toHaveBeenCalled();
+    expect(client._fetchJsonMock).not.toHaveBeenCalled();
+  });
+
+  it("returns policy denial from resolveClient", async () => {
+    const resolveClient = vi.fn().mockImplementation(() => {
+      throw new GraphApiError(
+        "Tool email_attachment_read is not permitted for account 'openclaw'. Allowed accounts: ['rod'].",
+        "user_input",
+        403,
+      );
+    });
+    const tool2 = createEmailAttachmentReadTool({ graphClient: client, resolveClient });
+
+    const result = parseResult(
+      await tool2.execute("id", { messageId: "msg-1", attachmentId: "att-1", account: "openclaw" }),
+    );
+    expect(result.error.category).toBe("user_input");
+    expect(result.error.message).toContain("not permitted");
   });
 });

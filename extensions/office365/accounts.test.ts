@@ -383,4 +383,47 @@ describe("calendar tool routing", () => {
     expect(isToolPermittedForAccount("calendar_list", "openclaw", CALENDAR_CONFIG)).toBe(false);
     expect(isToolPermittedForAccount("calendar_create", "openclaw", CALENDAR_CONFIG)).toBe(false);
   });
+
+  it("validateAccountsConfig accepts email_attachment_read", () => {
+    const config: Office365Config = {
+      clientId: "c",
+      tenantId: "t",
+      clientSecret: "s",
+      redirectUri: "http://localhost:8080/callback",
+      scopes: ["Mail.Read"],
+      accounts: {
+        rod: {
+          email: "rod@test.com",
+          scopes: ["Mail.Read"],
+          tools: ["email_list", "email_read", "email_attachment_read"],
+        },
+      },
+    };
+    const errors = validateAccountsConfig(config);
+    expect(errors).toEqual([]);
+  });
+
+  it("isToolPermittedForAccount allows email_attachment_read for assigned account", () => {
+    const config: Office365Config = {
+      clientId: "c",
+      tenantId: "t",
+      clientSecret: "s",
+      redirectUri: "http://localhost:8080/callback",
+      scopes: ["Mail.Read"],
+      accounts: {
+        rod: {
+          email: "rod@test.com",
+          scopes: ["Mail.Read"],
+          tools: ["email_attachment_read"],
+        },
+        openclaw: {
+          email: "openclaw@test.com",
+          scopes: ["Mail.Send"],
+          tools: ["email_send"],
+        },
+      },
+    };
+    expect(isToolPermittedForAccount("email_attachment_read", "rod", config)).toBe(true);
+    expect(isToolPermittedForAccount("email_attachment_read", "openclaw", config)).toBe(false);
+  });
 });

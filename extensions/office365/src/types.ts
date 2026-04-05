@@ -36,6 +36,13 @@ export type AttachmentMeta = {
   size: number;
 };
 
+export type GraphAttachment = AttachmentMeta & {
+  "@odata.type"?: string;
+  contentBytes?: string;
+  contentId?: string;
+  isInline?: boolean;
+};
+
 // ── Calendar event types ────────────────────────────────────────────────────
 
 export type GraphEvent = {

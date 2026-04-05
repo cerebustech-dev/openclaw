@@ -13,6 +13,7 @@ import { createEmailReadTool } from "./src/tools/email-read.js";
 import { createEmailSendTool } from "./src/tools/email-send.js";
 import { createEmailReplyTool } from "./src/tools/email-reply.js";
 import { createEmailSearchTool } from "./src/tools/email-search.js";
+import { createEmailAttachmentReadTool } from "./src/tools/email-attachment-read.js";
 import { createCalendarListTool } from "./src/tools/calendar-list.js";
 import { createCalendarCreateTool } from "./src/tools/calendar-create.js";
 import { createCalendarUpdateTool } from "./src/tools/calendar-update.js";
@@ -240,6 +241,7 @@ const office365Plugin = {
       api.registerTool(createEmailSendTool(toolDeps));
       api.registerTool(createEmailReplyTool(toolDeps));
       api.registerTool(createEmailSearchTool(toolDeps));
+      api.registerTool(createEmailAttachmentReadTool(toolDeps));
       api.registerTool(createCalendarListTool(toolDeps));
       api.registerTool(createCalendarCreateTool(toolDeps));
       api.registerTool(createCalendarUpdateTool(toolDeps));
@@ -322,7 +324,7 @@ const office365Plugin = {
                   },
                   configPatch: {},
                   notes: [
-                    "Microsoft 365 tools are now available: email_list, email_read, email_send, email_reply, email_search, calendar_list, calendar_create, calendar_update, calendar_delete.",
+                    "Microsoft 365 tools are now available: email_list, email_read, email_send, email_reply, email_search, email_attachment_read, calendar_list, calendar_create, calendar_update, calendar_delete.",
                   ],
                 });
               } catch (err) {
@@ -357,6 +359,7 @@ const office365Plugin = {
       api.registerTool(createEmailSendTool({ graphClient }));
       api.registerTool(createEmailReplyTool({ graphClient }));
       api.registerTool(createEmailSearchTool({ graphClient }));
+      api.registerTool(createEmailAttachmentReadTool({ graphClient }));
       api.registerTool(createCalendarListTool({ graphClient }));
       api.registerTool(createCalendarCreateTool({ graphClient }));
       api.registerTool(createCalendarUpdateTool({ graphClient }));
@@ -370,7 +373,7 @@ const office365Plugin = {
         }
         return {
           prependContext:
-            "Microsoft 365 tools are available: email_list (list/search messages), email_read (read full message by ID), email_send (compose and send new email), email_reply (reply to existing email), email_search (structured search with date ranges and filters), calendar_list (list/query calendar events with date range support), calendar_create (create new events), calendar_update (update existing events), calendar_delete (delete events by ID).",
+            "Microsoft 365 tools are available: email_list (list/search messages), email_read (read full message by ID), email_send (compose and send new email), email_reply (reply to existing email), email_search (structured search with date ranges and filters), email_attachment_read (download attachment content), calendar_list (list/query calendar events with date range support), calendar_create (create new events), calendar_update (update existing events), calendar_delete (delete events by ID).",
         };
       });
     }

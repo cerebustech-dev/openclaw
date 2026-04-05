@@ -1,6 +1,7 @@
 import { Type } from "@sinclair/typebox";
 import type { GraphClient } from "../graph-client.js";
 import { GraphApiError, toolSuccess, toolError } from "../types.js";
+import { validateAndMapAttachments } from "./_email-shared.js";
 
 // ── Schema ──────────────────────────────────────────────────────────────────
 
@@ -20,6 +21,13 @@ export const EmailReplySchema = Type.Object({
     Type.Boolean({
       description: "Whether to reply to all recipients. Default: false (reply to sender only).",
     }),
+  ),
+  attachments: Type.Optional(
+    Type.Array(Type.Object({
+      name: Type.String({ description: "Filename including extension." }),
+      contentType: Type.String({ description: "MIME type (e.g. application/pdf)." }),
+      contentBytes: Type.String({ description: "Base64-encoded file content." }),
+    }), { description: "File attachments. Max 10 attachments, max 3MB each." }),
   ),
 });
 
@@ -68,19 +76,36 @@ export function createEmailReplyTool(deps: {
 
       const replyAll = p.replyAll === true;
 
+      // ── Validate attachments ────────────────────────────────────────────
+      const attachResult = validateAndMapAttachments(p.attachments);
+      if (!attachResult.ok) {
+        return {
+          content: [{
+            type: "text" as const,
+            text: JSON.stringify(
+              toolError("user_input", attachResult.error),
+              null, 2,
+            ),
+          }],
+        };
+      }
+
       // ── Send reply ──────────────────────────────────────────────────────
       try {
         const client = deps.resolveClient?.("email_reply", account) ?? deps.graphClient;
         const encodedId = encodeURIComponent(messageId);
         const action = replyAll ? "replyAll" : "reply";
 
+        const message: Record<string, unknown> = {
+          body: { contentType: "HTML", content: body },
+        };
+        if (attachResult.attachments) {
+          message.attachments = attachResult.attachments;
+        }
+
         await client.fetch(`/me/messages/${encodedId}/${action}`, {
           method: "POST",
-          body: JSON.stringify({
-            message: {
-              body: { contentType: "HTML", content: body },
-            },
-          }),
+          body: JSON.stringify({ message }),
         });
 
         const result = toolSuccess({
