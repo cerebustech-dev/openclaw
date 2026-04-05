@@ -1,7 +1,7 @@
 import { Type } from "@sinclair/typebox";
 import type { GraphClient } from "../graph-client.js";
 import type { GraphEventListResponse } from "../types.js";
-import { GraphApiError, toolSuccess, toolError } from "../types.js";
+import { GraphApiError, toolSuccess, toolErrorResult } from "../types.js";
 import {
   DEFAULT_TIMEZONE,
   EVENT_SELECT_FIELDS,
@@ -88,9 +88,7 @@ export function createCalendarListTool(deps: {
       // Validate date range
       const dateError = validateDateRange(startDateTime, endDateTime);
       if (dateError) {
-        return {
-          content: [{ type: "text" as const, text: JSON.stringify(toolError("user_input", dateError.error), null, 2) }],
-        };
+        return toolErrorResult("user_input", dateError.error);
       }
 
       try {
@@ -141,9 +139,7 @@ export function createCalendarListTool(deps: {
         const safeMsg = err instanceof GraphApiError
           ? err.message
           : "An unexpected error occurred. Check gateway logs for details.";
-        return {
-          content: [{ type: "text" as const, text: JSON.stringify(toolError(category, safeMsg), null, 2) }],
-        };
+        return toolErrorResult(category, safeMsg);
       }
     },
   };

@@ -1,7 +1,7 @@
 import { Type } from "@sinclair/typebox";
 import type { GraphClient } from "../graph-client.js";
 import type { AttachmentMeta, GraphMessage } from "../types.js";
-import { GraphApiError, toolSuccess, toolError } from "../types.js";
+import { GraphApiError, toolSuccess, toolErrorResult } from "../types.js";
 
 // ── Constants ───────────────────────────────────────────────────────────────
 
@@ -88,12 +88,7 @@ export function createEmailReadTool(deps: {
       const markAsRead = p.markAsRead === true;
 
       if (!messageId) {
-        return {
-          content: [{
-            type: "text" as const,
-            text: JSON.stringify(toolError("user_input", "messageId is required."), null, 2),
-          }],
-        };
+        return toolErrorResult("user_input", "messageId is required.");
       }
 
       try {
@@ -174,12 +169,7 @@ export function createEmailReadTool(deps: {
         const safeMsg = err instanceof GraphApiError
           ? err.message
           : "An unexpected error occurred. Check gateway logs for details.";
-        return {
-          content: [{
-            type: "text" as const,
-            text: JSON.stringify(toolError(category, safeMsg), null, 2),
-          }],
-        };
+        return toolErrorResult(category, safeMsg);
       }
     },
   };

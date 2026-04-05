@@ -1,6 +1,6 @@
 import { Type } from "@sinclair/typebox";
 import type { GraphClient } from "../graph-client.js";
-import { GraphApiError, toolSuccess, toolError } from "../types.js";
+import { GraphApiError, toolSuccess, toolErrorResult } from "../types.js";
 import { validateAndMapAttachments } from "./_email-shared.js";
 
 // ── Schema ──────────────────────────────────────────────────────────────────
@@ -50,28 +50,12 @@ export function createEmailReplyTool(deps: {
       // ── Validate required fields ────────────────────────────────────────
       const messageId = typeof p.messageId === "string" ? p.messageId.trim() : "";
       if (!messageId) {
-        return {
-          content: [{
-            type: "text" as const,
-            text: JSON.stringify(
-              toolError("user_input", "A 'messageId' is required."),
-              null, 2,
-            ),
-          }],
-        };
+        return toolErrorResult("user_input", "A 'messageId' is required.");
       }
 
       const body = typeof p.body === "string" ? p.body : "";
       if (!body) {
-        return {
-          content: [{
-            type: "text" as const,
-            text: JSON.stringify(
-              toolError("user_input", "A 'body' is required."),
-              null, 2,
-            ),
-          }],
-        };
+        return toolErrorResult("user_input", "A 'body' is required.");
       }
 
       const replyAll = p.replyAll === true;
@@ -79,15 +63,7 @@ export function createEmailReplyTool(deps: {
       // ── Validate attachments ────────────────────────────────────────────
       const attachResult = validateAndMapAttachments(p.attachments);
       if (!attachResult.ok) {
-        return {
-          content: [{
-            type: "text" as const,
-            text: JSON.stringify(
-              toolError("user_input", attachResult.error),
-              null, 2,
-            ),
-          }],
-        };
+        return toolErrorResult("user_input", attachResult.error);
       }
 
       // ── Send reply ──────────────────────────────────────────────────────
@@ -123,12 +99,7 @@ export function createEmailReplyTool(deps: {
         const safeMsg = err instanceof GraphApiError
           ? err.message
           : "An unexpected error occurred. Check gateway logs for details.";
-        return {
-          content: [{
-            type: "text" as const,
-            text: JSON.stringify(toolError(category, safeMsg), null, 2),
-          }],
-        };
+        return toolErrorResult(category, safeMsg);
       }
     },
   };

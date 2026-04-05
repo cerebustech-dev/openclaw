@@ -471,7 +471,7 @@ describe("callback server CSRF protection on error responses", () => {
     if ("stillRunning" in result) {
       // Good: the CSRF error without state did NOT terminate the flow
       expect(result.stillRunning).toBe(true);
-    } else {
+    } else if ("error" in result) {
       // If it errored, it should NOT be because of the CSRF attack
       expect(result.error).not.toContain("access_denied");
     }

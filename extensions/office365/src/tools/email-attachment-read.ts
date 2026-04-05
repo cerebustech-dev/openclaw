@@ -1,7 +1,7 @@
 import { Type } from "@sinclair/typebox";
 import type { GraphClient } from "../graph-client.js";
 import type { GraphAttachment } from "../types.js";
-import { GraphApiError, toolSuccess, toolError } from "../types.js";
+import { GraphApiError, toolSuccess, toolErrorResult } from "../types.js";
 
 // ── Constants ───────────────────────────────────────────────────────────────
 
@@ -54,21 +54,11 @@ export function createEmailAttachmentReadTool(deps: {
       const attachmentId = typeof p.attachmentId === "string" ? p.attachmentId.trim() : "";
 
       if (!messageId) {
-        return {
-          content: [{
-            type: "text" as const,
-            text: JSON.stringify(toolError("user_input", "messageId is required."), null, 2),
-          }],
-        };
+        return toolErrorResult("user_input", "messageId is required.");
       }
 
       if (!attachmentId) {
-        return {
-          content: [{
-            type: "text" as const,
-            text: JSON.stringify(toolError("user_input", "attachmentId is required."), null, 2),
-          }],
-        };
+        return toolErrorResult("user_input", "attachmentId is required.");
       }
 
       try {
@@ -144,12 +134,7 @@ export function createEmailAttachmentReadTool(deps: {
         const safeMsg = err instanceof GraphApiError
           ? err.message
           : "An unexpected error occurred. Check gateway logs for details.";
-        return {
-          content: [{
-            type: "text" as const,
-            text: JSON.stringify(toolError(category, safeMsg), null, 2),
-          }],
-        };
+        return toolErrorResult(category, safeMsg);
       }
     },
   };

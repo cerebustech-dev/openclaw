@@ -1,6 +1,6 @@
 import { Type } from "@sinclair/typebox";
 import type { GraphClient } from "../graph-client.js";
-import { GraphApiError, toolSuccess, toolError } from "../types.js";
+import { GraphApiError, toolSuccess, toolErrorResult } from "../types.js";
 
 // ── Schema ──────────────────────────────────────────────────────────────────
 
@@ -33,9 +33,7 @@ export function createCalendarDeleteTool(deps: {
       const eventId = typeof p.eventId === "string" ? p.eventId.trim() : "";
 
       if (!eventId) {
-        return {
-          content: [{ type: "text" as const, text: JSON.stringify(toolError("user_input", "An 'eventId' is required."), null, 2) }],
-        };
+        return toolErrorResult("user_input", "An 'eventId' is required.");
       }
 
       try {
@@ -56,9 +54,7 @@ export function createCalendarDeleteTool(deps: {
         const safeMsg = err instanceof GraphApiError
           ? err.message
           : "An unexpected error occurred. Check gateway logs for details.";
-        return {
-          content: [{ type: "text" as const, text: JSON.stringify(toolError(category, safeMsg), null, 2) }],
-        };
+        return toolErrorResult(category, safeMsg);
       }
     },
   };

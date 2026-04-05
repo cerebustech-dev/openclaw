@@ -1,7 +1,7 @@
 import { Type } from "@sinclair/typebox";
 import type { GraphClient } from "../graph-client.js";
 import type { GraphEvent } from "../types.js";
-import { GraphApiError, toolSuccess, toolError } from "../types.js";
+import { GraphApiError, toolSuccess, toolErrorResult } from "../types.js";
 import { DEFAULT_TIMEZONE, formatEventSummary, checkConflicts, formatConflictMessage } from "./_calendar-shared.js";
 
 // ── Schema ──────────────────────────────────────────────────────────────────
@@ -84,9 +84,7 @@ export function createCalendarUpdateTool(deps: {
       const eventId = typeof p.eventId === "string" ? p.eventId.trim() : "";
 
       if (!eventId) {
-        return {
-          content: [{ type: "text" as const, text: JSON.stringify(toolError("user_input", "An 'eventId' is required."), null, 2) }],
-        };
+        return toolErrorResult("user_input", "An 'eventId' is required.");
       }
 
       // Build partial update body — only include provided fields
@@ -122,9 +120,7 @@ export function createCalendarUpdateTool(deps: {
       if (typeof p.showAs === "string") patch.showAs = p.showAs.trim();
 
       if (Object.keys(patch).length === 0) {
-        return {
-          content: [{ type: "text" as const, text: JSON.stringify(toolError("user_input", "At least one field to update must be provided."), null, 2) }],
-        };
+        return toolErrorResult("user_input", "At least one field to update must be provided.");
       }
 
       // ── Conflict check (only when both dates change) ────────────────────
@@ -136,18 +132,10 @@ export function createCalendarUpdateTool(deps: {
           const client = deps.resolveClient?.("calendar_update", account) ?? deps.graphClient;
           const conflictResult = await checkConflicts(client, startDateTime, endDateTime, tz, eventId);
           if (conflictResult.hasConflicts && p.forceUpdate !== true) {
-            return {
-              content: [{
-                type: "text" as const,
-                text: JSON.stringify(
-                  toolError("user_input", formatConflictMessage(
+            return toolErrorResult("user_input", formatConflictMessage(
                     conflictResult.conflicts, startDateTime, endDateTime,
                     "forceUpdate", conflictResult.scanIncomplete,
-                  )),
-                  null, 2,
-                ),
-              }],
-            };
+                  ));
           }
           if (conflictResult.hasConflicts) {
             conflictWarnings = conflictResult.conflicts;
@@ -157,12 +145,7 @@ export function createCalendarUpdateTool(deps: {
           const safeMsg = err instanceof GraphApiError
             ? err.message
             : "An unexpected error occurred. Check gateway logs for details.";
-          return {
-            content: [{
-              type: "text" as const,
-              text: JSON.stringify(toolError(category, safeMsg), null, 2),
-            }],
-          };
+          return toolErrorResult(category, safeMsg);
         }
       }
 
@@ -201,9 +184,7 @@ export function createCalendarUpdateTool(deps: {
         const safeMsg = err instanceof GraphApiError
           ? err.message
           : "An unexpected error occurred. Check gateway logs for details.";
-        return {
-          content: [{ type: "text" as const, text: JSON.stringify(toolError(category, safeMsg), null, 2) }],
-        };
+        return toolErrorResult(category, safeMsg);
       }
     },
   };

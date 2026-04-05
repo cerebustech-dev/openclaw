@@ -1,36 +1,8 @@
 import { Type } from "@sinclair/typebox";
 import type { GraphClient } from "../graph-client.js";
 import type { GraphListResponse } from "../types.js";
-import { GraphApiError, toolSuccess, toolError } from "../types.js";
-import { SELECT_FIELDS, formatMessageSummary } from "./_email-shared.js";
-
-// ── Folder mapping ──────────────────────────────────────────────────────────
-
-const FOLDER_MAP: Record<string, string> = {
-  inbox: "Inbox",
-  sent: "SentItems",
-  sentitems: "SentItems",
-  drafts: "Drafts",
-  deleted: "DeletedItems",
-  deleteditems: "DeletedItems",
-  archive: "Archive",
-  junk: "JunkEmail",
-  junkemail: "JunkEmail",
-};
-
-const KNOWN_FOLDERS = new Set(Object.values(FOLDER_MAP));
-
-function resolveFolder(input: string): string | { error: string } {
-  const lower = input.toLowerCase().replace(/[\s_-]/g, "");
-  const mapped = FOLDER_MAP[lower];
-  if (mapped) return mapped;
-  if (KNOWN_FOLDERS.has(input)) return input;
-  // Allow raw folder IDs (long Graph API identifiers: alphanumeric + base64/URL-safe chars)
-  if (input.length > 20 && /^[A-Za-z0-9+=_-]+$/.test(input)) return input;
-  return {
-    error: `Unknown folder '${input}'. Use: Inbox, SentItems, Drafts, DeletedItems, Archive, JunkEmail, or a folder ID.`,
-  };
-}
+import { GraphApiError, toolSuccess, toolErrorResult } from "../types.js";
+import { SELECT_FIELDS, formatMessageSummary, resolveFolder } from "./_email-shared.js";
 
 // ── Schema ──────────────────────────────────────────────────────────────────
 
@@ -107,20 +79,12 @@ export function createEmailListTool(deps: {
       // Validate folder
       const folder = resolveFolder(folderInput);
       if (typeof folder === "object") {
-        return { content: [{ type: "text" as const, text: JSON.stringify(toolError("user_input", folder.error), null, 2) }] };
+        return toolErrorResult("user_input", folder.error);
       }
 
       // $search and $filter cannot be combined
       if (search && filter) {
-        return {
-          content: [{
-            type: "text" as const,
-            text: JSON.stringify(
-              toolError("user_input", "Cannot combine $search and $filter in the same request. Use one or the other."),
-              null, 2,
-            ),
-          }],
-        };
+        return toolErrorResult("user_input", "Cannot combine $search and $filter in the same request. Use one or the other.");
       }
 
       try {
@@ -183,9 +147,7 @@ export function createEmailListTool(deps: {
         const safeMsg = err instanceof GraphApiError
           ? err.message
           : "An unexpected error occurred. Check gateway logs for details.";
-        return {
-          content: [{ type: "text" as const, text: JSON.stringify(toolError(category, safeMsg), null, 2) }],
-        };
+        return toolErrorResult(category, safeMsg);
       }
     },
   };

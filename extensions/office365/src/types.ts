@@ -117,6 +117,25 @@ export function toolError(
   return { schemaVersion: 1, error: { category, message } };
 }
 
+// All tool error/validation returns MUST use toolErrorResult() to satisfy
+// AgentToolResult<T>.details requirement. Do not return { content: [...] }
+// without details — tsc --noEmit will catch it, but this helper prevents it.
+type ToolErrorReturn = {
+  content: [{ type: "text"; text: string }];
+  details: ToolResponse<never>;
+};
+
+export function toolErrorResult(
+  category: GraphErrorCategory,
+  message: string,
+): ToolErrorReturn {
+  const err = toolError(category, message);
+  return {
+    content: [{ type: "text" as const, text: JSON.stringify(err, null, 2) }],
+    details: err,
+  };
+}
+
 // ── Credential shape ────────────────────────────────────────────────────────
 
 export type Office365Credential = {

@@ -1,7 +1,7 @@
 import { Type } from "@sinclair/typebox";
 import type { GraphClient } from "../graph-client.js";
 import type { GraphListResponse } from "../types.js";
-import { GraphApiError, toolSuccess, toolError } from "../types.js";
+import { GraphApiError, toolSuccess, toolErrorResult } from "../types.js";
 import { SELECT_FIELDS, formatMessageSummary } from "./_email-shared.js";
 
 // ── KQL builder ─────────────────────────────────────────────────────────────
@@ -141,15 +141,7 @@ export function createEmailSearchTool(deps: {
 
       // Must provide at least one search criterion
       if (!query && !from && !to && !subject && hasAttachments === undefined && !dateFromRaw && !dateToRaw) {
-        return {
-          content: [{
-            type: "text" as const,
-            text: JSON.stringify(
-              toolError("user_input", "Provide at least one search criterion (query, from, to, subject, hasAttachments, dateFrom, or dateTo)."),
-              null, 2,
-            ),
-          }],
-        };
+        return toolErrorResult("user_input", "Provide at least one search criterion (query, from, to, subject, hasAttachments, dateFrom, or dateTo).");
       }
 
       // Parse and validate dates
@@ -159,7 +151,7 @@ export function createEmailSearchTool(deps: {
       if (dateFromRaw) {
         const parsed = parseSearchDate(dateFromRaw, "dateFrom");
         if ("error" in parsed) {
-          return { content: [{ type: "text" as const, text: JSON.stringify(toolError("user_input", parsed.error), null, 2) }] };
+          return toolErrorResult("user_input", parsed.error);
         }
         dateFromIso = parsed.iso;
       }
@@ -167,22 +159,14 @@ export function createEmailSearchTool(deps: {
       if (dateToRaw) {
         const parsed = parseSearchDate(dateToRaw, "dateTo");
         if ("error" in parsed) {
-          return { content: [{ type: "text" as const, text: JSON.stringify(toolError("user_input", parsed.error), null, 2) }] };
+          return toolErrorResult("user_input", parsed.error);
         }
         // For date-only dateTo, advance to next day for exclusive boundary
         dateToIso = parsed.isDateOnly ? addOneDay(parsed.iso) : parsed.iso;
       }
 
       if (dateFromIso && dateToIso && dateFromIso >= dateToIso) {
-        return {
-          content: [{
-            type: "text" as const,
-            text: JSON.stringify(
-              toolError("user_input", "dateFrom must be before dateTo."),
-              null, 2,
-            ),
-          }],
-        };
+        return toolErrorResult("user_input", "dateFrom must be before dateTo.");
       }
 
       try {
@@ -261,9 +245,7 @@ export function createEmailSearchTool(deps: {
         const safeMsg = err instanceof GraphApiError
           ? err.message
           : "An unexpected error occurred. Check gateway logs for details.";
-        return {
-          content: [{ type: "text" as const, text: JSON.stringify(toolError(category, safeMsg), null, 2) }],
-        };
+        return toolErrorResult(category, safeMsg);
       }
     },
   };

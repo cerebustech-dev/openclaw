@@ -1,7 +1,7 @@
 import { Type } from "@sinclair/typebox";
 import type { GraphClient } from "../graph-client.js";
 import type { GraphEvent } from "../types.js";
-import { GraphApiError, toolSuccess, toolError } from "../types.js";
+import { GraphApiError, toolSuccess, toolErrorResult } from "../types.js";
 import { DEFAULT_TIMEZONE, formatEventSummary, validateDateRange, checkConflicts, formatConflictMessage } from "./_calendar-shared.js";
 
 // ── Schema ──────────────────────────────────────────────────────────────────
@@ -85,31 +85,23 @@ export function createCalendarCreateTool(deps: {
       // Validate required fields
       const subject = typeof p.subject === "string" ? p.subject.trim() : "";
       if (!subject) {
-        return {
-          content: [{ type: "text" as const, text: JSON.stringify(toolError("user_input", "A 'subject' is required."), null, 2) }],
-        };
+        return toolErrorResult("user_input", "A 'subject' is required.");
       }
 
       const startDateTime = typeof p.startDateTime === "string" ? p.startDateTime.trim() : "";
       if (!startDateTime) {
-        return {
-          content: [{ type: "text" as const, text: JSON.stringify(toolError("user_input", "A 'startDateTime' is required."), null, 2) }],
-        };
+        return toolErrorResult("user_input", "A 'startDateTime' is required.");
       }
 
       const endDateTime = typeof p.endDateTime === "string" ? p.endDateTime.trim() : "";
       if (!endDateTime) {
-        return {
-          content: [{ type: "text" as const, text: JSON.stringify(toolError("user_input", "An 'endDateTime' is required."), null, 2) }],
-        };
+        return toolErrorResult("user_input", "An 'endDateTime' is required.");
       }
 
       // Validate date range
       const dateError = validateDateRange(startDateTime, endDateTime);
       if (dateError) {
-        return {
-          content: [{ type: "text" as const, text: JSON.stringify(toolError("user_input", dateError.error), null, 2) }],
-        };
+        return toolErrorResult("user_input", dateError.error);
       }
 
       const tz = typeof p.timeZone === "string" ? p.timeZone.trim() : DEFAULT_TIMEZONE;
@@ -125,18 +117,10 @@ export function createCalendarCreateTool(deps: {
           const client = deps.resolveClient?.("calendar_create", account) ?? deps.graphClient;
           const conflictResult = await checkConflicts(client, startDateTime, endDateTime, tz);
           if (conflictResult.hasConflicts && !force) {
-            return {
-              content: [{
-                type: "text" as const,
-                text: JSON.stringify(
-                  toolError("user_input", formatConflictMessage(
+            return toolErrorResult("user_input", formatConflictMessage(
                     conflictResult.conflicts, startDateTime, endDateTime,
                     "forceCreate", conflictResult.scanIncomplete,
-                  )),
-                  null, 2,
-                ),
-              }],
-            };
+                  ));
           }
           if (conflictResult.hasConflicts) {
             conflictWarnings = conflictResult.conflicts;
@@ -146,12 +130,7 @@ export function createCalendarCreateTool(deps: {
           const safeMsg = err instanceof GraphApiError
             ? err.message
             : "An unexpected error occurred. Check gateway logs for details.";
-          return {
-            content: [{
-              type: "text" as const,
-              text: JSON.stringify(toolError(category, safeMsg), null, 2),
-            }],
-          };
+          return toolErrorResult(category, safeMsg);
         }
       }
 
@@ -209,9 +188,7 @@ export function createCalendarCreateTool(deps: {
         const safeMsg = err instanceof GraphApiError
           ? err.message
           : "An unexpected error occurred. Check gateway logs for details.";
-        return {
-          content: [{ type: "text" as const, text: JSON.stringify(toolError(category, safeMsg), null, 2) }],
-        };
+        return toolErrorResult(category, safeMsg);
       }
     },
   };

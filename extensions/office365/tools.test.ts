@@ -5,13 +5,15 @@ import { createEmailReadTool } from "./src/tools/email-read.js";
 import { createEmailSendTool } from "./src/tools/email-send.js";
 import { createEmailReplyTool } from "./src/tools/email-reply.js";
 import { createEmailSearchTool } from "./src/tools/email-search.js";
-import { GraphApiError } from "./src/types.js";
+import { GraphApiError, toolError, toolErrorResult } from "./src/types.js";
 import { formatEventSummary, validateDateRange, checkConflicts } from "./src/tools/_calendar-shared.js";
+import { resolveFolder } from "./src/tools/_email-shared.js";
 import { createCalendarListTool } from "./src/tools/calendar-list.js";
 import { createCalendarUpdateTool } from "./src/tools/calendar-update.js";
 import { createCalendarDeleteTool } from "./src/tools/calendar-delete.js";
 import { createCalendarCreateTool } from "./src/tools/calendar-create.js";
 import { createEmailAttachmentReadTool } from "./src/tools/email-attachment-read.js";
+import { createEmailMoveTool } from "./src/tools/email-move.js";
 import type { GraphEvent } from "./src/types.js";
 
 // ── Mock Graph client ───────────────────────────────────────────────────────
@@ -3408,5 +3410,511 @@ describe("email_attachment_read", () => {
     );
     expect(result.error.category).toBe("user_input");
     expect(result.error.message).toContain("not permitted");
+  });
+});
+
+// ── error path details presence (representative) ──────────────────────────
+
+describe("email_list error path details", () => {
+  let client: ReturnType<typeof createMockGraphClient>;
+  let tool: ReturnType<typeof createEmailListTool>;
+
+  beforeEach(() => {
+    client = createMockGraphClient();
+    tool = createEmailListTool({ graphClient: client });
+  });
+
+  it("includes details on folder validation error", async () => {
+    const result = await tool.execute("id", { folder: "bogus" });
+    expect(result).toHaveProperty("details");
+    expect((result as { details: { error?: unknown } }).details).toHaveProperty("error");
+  });
+
+  it("includes details on catch (GraphApiError)", async () => {
+    client._fetchJsonMock.mockRejectedValue(new GraphApiError("fail", "permission", 403));
+    const result = await tool.execute("id", {});
+    expect(result).toHaveProperty("details");
+    const details = (result as { details: { error?: { category: string } } }).details;
+    expect(details.error?.category).toBe("permission");
+  });
+
+  it("includes details on catch (generic error)", async () => {
+    client._fetchJsonMock.mockRejectedValue(new Error("boom"));
+    const result = await tool.execute("id", {});
+    expect(result).toHaveProperty("details");
+    const details = (result as { details: { error?: { category: string } } }).details;
+    expect(details.error?.category).toBe("transient");
+  });
+});
+
+describe("calendar_create error path details", () => {
+  let client: ReturnType<typeof createMockGraphClient>;
+  let tool: ReturnType<typeof createCalendarCreateTool>;
+
+  beforeEach(() => {
+    client = createMockGraphClient();
+    tool = createCalendarCreateTool({ graphClient: client });
+  });
+
+  it("includes details on missing subject", async () => {
+    const result = await tool.execute("id", {
+      subject: "",
+      startDateTime: "2026-04-05T09:00:00",
+      endDateTime: "2026-04-05T10:00:00",
+    });
+    expect(result).toHaveProperty("details");
+    expect((result as { details: { error?: unknown } }).details).toHaveProperty("error");
+  });
+
+  it("includes details on catch", async () => {
+    client._fetchJsonMock.mockRejectedValue(new GraphApiError("fail", "transient", 500));
+    const result = await tool.execute("id", {
+      subject: "Test",
+      startDateTime: "2026-04-05T09:00:00",
+      endDateTime: "2026-04-05T10:00:00",
+    });
+    expect(result).toHaveProperty("details");
+  });
+});
+
+// ── toolErrorResult helper tests ───────────────────────────────────────────
+
+describe("toolErrorResult helper", () => {
+  it("returns object with both content and details", () => {
+    const result = toolErrorResult("user_input", "test error");
+    expect(result.content).toHaveLength(1);
+    expect(result.content[0].type).toBe("text");
+    expect(result.details).toBeDefined();
+    expect(result.details.schemaVersion).toBe(1);
+    expect(result.details.error?.category).toBe("user_input");
+  });
+
+  it("content text is parseable and matches details", () => {
+    const result = toolErrorResult("transient", "server error");
+    expect(JSON.parse(result.content[0].text)).toEqual(result.details);
+  });
+
+  it("details matches toolError() envelope", () => {
+    const result = toolErrorResult("auth", "not authenticated");
+    expect(result.details).toEqual(toolError("auth", "not authenticated"));
+  });
+});
+
+// ── email_move tests ──────────────────────────────────────────────────────
+
+describe("email_move", () => {
+  let client: ReturnType<typeof createMockGraphClient>;
+  let tool: ReturnType<typeof createEmailMoveTool>;
+
+  const MOVED_MESSAGE = {
+    id: "msg-new-id-after-move",
+    subject: "Test Subject",
+    from: { emailAddress: { name: "Sender", address: "sender@test.com" } },
+    toRecipients: [{ emailAddress: { address: "me@test.com" } }],
+    receivedDateTime: "2026-04-05T10:00:00Z",
+    isRead: true,
+    hasAttachments: false,
+    bodyPreview: "Preview text",
+    importance: "normal",
+    flag: { flagStatus: "notFlagged" },
+  };
+
+  beforeEach(() => {
+    client = createMockGraphClient();
+    client._fetchMock.mockResolvedValue(
+      new Response(JSON.stringify(MOVED_MESSAGE), {
+        status: 201,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    tool = createEmailMoveTool({ graphClient: client });
+  });
+
+  // ── Happy path ──────────────────────────────────────────────────────────
+
+  it("moves message to a well-known folder", async () => {
+    const result = await tool.execute("id", {
+      messageId: "msg-1",
+      destinationFolder: "Archive",
+    });
+    const parsed = parseResult(result);
+
+    expect(parsed.data.moved).toBe(true);
+    expect(parsed.data.newMessageId).toBe("msg-new-id-after-move");
+    expect(client._fetchMock).toHaveBeenCalledWith(
+      "/me/messages/msg-1/move",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ destinationId: "Archive" }),
+      }),
+    );
+  });
+
+  it("maps friendly folder names to Graph identifiers", async () => {
+    for (const [input, expected] of [
+      ["deleted", "DeletedItems"],
+      ["sent", "SentItems"],
+      ["junk", "JunkEmail"],
+      ["drafts", "Drafts"],
+      ["inbox", "Inbox"],
+    ] as const) {
+      client._fetchMock.mockResolvedValue(
+        new Response(JSON.stringify(MOVED_MESSAGE), { status: 201 }),
+      );
+      await tool.execute("id", { messageId: "msg-1", destinationFolder: input });
+
+      expect(client._fetchMock).toHaveBeenLastCalledWith(
+        "/me/messages/msg-1/move",
+        expect.objectContaining({
+          body: JSON.stringify({ destinationId: expected }),
+        }),
+      );
+    }
+  });
+
+  it("accepts raw folder IDs (long alphanumeric strings)", async () => {
+    const rawId = "AAMkAGQ0ZTBhZmYxLTg2OGEtNGQxNy05YzFhLTk";
+    await tool.execute("id", { messageId: "msg-1", destinationFolder: rawId });
+
+    expect(client._fetchMock).toHaveBeenCalledWith(
+      "/me/messages/msg-1/move",
+      expect.objectContaining({
+        body: JSON.stringify({ destinationId: rawId }),
+      }),
+    );
+  });
+
+  it("encodes messageId in URL path", async () => {
+    await tool.execute("id", {
+      messageId: "AAMkAD+special/chars=",
+      destinationFolder: "Archive",
+    });
+
+    expect(client._fetchMock).toHaveBeenCalledWith(
+      `/me/messages/${encodeURIComponent("AAMkAD+special/chars=")}/move`,
+      expect.any(Object),
+    );
+  });
+
+  it("returns both previousMessageId and newMessageId when ID changes", async () => {
+    const result = await tool.execute("id", {
+      messageId: "msg-original",
+      destinationFolder: "Archive",
+    });
+    const parsed = parseResult(result);
+
+    expect(parsed.data.previousMessageId).toBe("msg-original");
+    expect(parsed.data.newMessageId).toBe("msg-new-id-after-move");
+  });
+
+  it("handles same-ID-after-move without error", async () => {
+    const sameIdMessage = { ...MOVED_MESSAGE, id: "msg-same" };
+    client._fetchMock.mockResolvedValue(
+      new Response(JSON.stringify(sameIdMessage), { status: 201 }),
+    );
+
+    const result = await tool.execute("id", {
+      messageId: "msg-same",
+      destinationFolder: "Archive",
+    });
+    const parsed = parseResult(result);
+
+    expect(parsed.data.moved).toBe(true);
+    expect(parsed.data.previousMessageId).toBe("msg-same");
+    expect(parsed.data.newMessageId).toBe("msg-same");
+  });
+
+  // ── Input validation ────────────────────────────────────────────────────
+
+  it("returns user_input error for missing messageId", async () => {
+    const result = await tool.execute("id", { destinationFolder: "Archive" });
+    const parsed = parseResult(result);
+
+    expect(parsed.error.category).toBe("user_input");
+    expect(parsed.error.message).toContain("messageId");
+  });
+
+  it("returns user_input error for missing destinationFolder", async () => {
+    const result = await tool.execute("id", { messageId: "msg-1" });
+    const parsed = parseResult(result);
+
+    expect(parsed.error.category).toBe("user_input");
+    expect(parsed.error.message).toContain("destinationFolder");
+  });
+
+  it("returns user_input error for invalid folder name", async () => {
+    const result = await tool.execute("id", {
+      messageId: "msg-1",
+      destinationFolder: "bogus",
+    });
+    const parsed = parseResult(result);
+
+    expect(parsed.error.category).toBe("user_input");
+    expect(parsed.error.message).toContain("Unknown folder");
+    expect(parsed.error.message).toContain("SentItems");
+  });
+
+  // ── Error handling ──────────────────────────────────────────────────────
+
+  it("handles not_found error (404) for missing message", async () => {
+    client._fetchMock.mockRejectedValue(
+      new GraphApiError("Resource not found", "not_found", 404),
+    );
+
+    const result = await tool.execute("id", {
+      messageId: "msg-gone",
+      destinationFolder: "Archive",
+    });
+    const parsed = parseResult(result);
+
+    expect(parsed.error.category).toBe("not_found");
+  });
+
+  it("handles permission error (403)", async () => {
+    client._fetchMock.mockRejectedValue(
+      new GraphApiError("Forbidden", "permission", 403),
+    );
+
+    const result = await tool.execute("id", {
+      messageId: "msg-1",
+      destinationFolder: "Archive",
+    });
+    const parsed = parseResult(result);
+
+    expect(parsed.error.category).toBe("permission");
+  });
+
+  it("handles bad request error (400)", async () => {
+    client._fetchMock.mockRejectedValue(
+      new GraphApiError("Bad destination folder", "user_input", 400),
+    );
+
+    const result = await tool.execute("id", {
+      messageId: "msg-1",
+      destinationFolder: "Archive",
+    });
+    const parsed = parseResult(result);
+
+    expect(parsed.error.category).toBe("user_input");
+  });
+
+  it("preserves GraphApiError categories (throttle)", async () => {
+    client._fetchMock.mockRejectedValue(
+      new GraphApiError("Too many requests", "throttle", 429),
+    );
+
+    const result = await tool.execute("id", {
+      messageId: "msg-1",
+      destinationFolder: "Archive",
+    });
+    const parsed = parseResult(result);
+
+    expect(parsed.error.category).toBe("throttle");
+  });
+
+  it("sanitizes non-GraphApiError messages", async () => {
+    client._fetchMock.mockRejectedValue(
+      new Error("token=leaked at https://internal.secret"),
+    );
+
+    const result = await tool.execute("id", {
+      messageId: "msg-1",
+      destinationFolder: "Archive",
+    });
+    const parsed = parseResult(result);
+
+    expect(parsed.error.category).toBe("transient");
+    expect(parsed.error.message).not.toContain("leaked");
+    expect(parsed.error.message).not.toContain("internal.secret");
+  });
+
+  // ── Edge cases ──────────────────────────────────────────────────────────
+
+  it("trims whitespace from messageId and destinationFolder", async () => {
+    await tool.execute("id", {
+      messageId: "  msg-1  ",
+      destinationFolder: "  Archive  ",
+    });
+
+    expect(client._fetchMock).toHaveBeenCalledWith(
+      "/me/messages/msg-1/move",
+      expect.objectContaining({
+        body: JSON.stringify({ destinationId: "Archive" }),
+      }),
+    );
+  });
+
+  it("handles mixed case/underscores/hyphens in folder names", async () => {
+    for (const [input, expected] of [
+      [" Sent-Items ", "SentItems"],
+      ["Deleted_Items", "DeletedItems"],
+      ["JUNK", "JunkEmail"],
+    ] as const) {
+      client._fetchMock.mockResolvedValue(
+        new Response(JSON.stringify(MOVED_MESSAGE), { status: 201 }),
+      );
+      await tool.execute("id", { messageId: "msg-1", destinationFolder: input });
+
+      expect(client._fetchMock).toHaveBeenLastCalledWith(
+        "/me/messages/msg-1/move",
+        expect.objectContaining({
+          body: JSON.stringify({ destinationId: expected }),
+        }),
+      );
+    }
+  });
+
+  it("handles minimal moved message payload gracefully", async () => {
+    const minimal = { id: "msg-minimal" };
+    client._fetchMock.mockResolvedValue(
+      new Response(JSON.stringify(minimal), { status: 201 }),
+    );
+
+    const result = await tool.execute("id", {
+      messageId: "msg-1",
+      destinationFolder: "Archive",
+    });
+    const parsed = parseResult(result);
+
+    expect(parsed.data.moved).toBe(true);
+    expect(parsed.data.newMessageId).toBe("msg-minimal");
+    expect(parsed.data.message.subject).toBe("(no subject)");
+    expect(parsed.data.message.from).toBe("(unknown)");
+  });
+
+  it("passes through long unknown strings as folder IDs", async () => {
+    const longId = "A".repeat(25);
+    await tool.execute("id", { messageId: "msg-1", destinationFolder: longId });
+
+    expect(client._fetchMock).toHaveBeenCalledWith(
+      "/me/messages/msg-1/move",
+      expect.objectContaining({
+        body: JSON.stringify({ destinationId: longId }),
+      }),
+    );
+  });
+
+  // ── Multi-account ───────────────────────────────────────────────────────
+
+  it("uses resolveClient when provided with account param", async () => {
+    const rodClient = createMockGraphClient();
+    rodClient._fetchMock.mockResolvedValue(
+      new Response(JSON.stringify(MOVED_MESSAGE), { status: 201 }),
+    );
+    const resolveClient = vi.fn().mockReturnValue(rodClient);
+    const multiTool = createEmailMoveTool({
+      graphClient: client,
+      resolveClient,
+    });
+
+    await multiTool.execute("id", {
+      messageId: "msg-1",
+      destinationFolder: "Archive",
+      account: "rod",
+    });
+
+    expect(resolveClient).toHaveBeenCalledWith("email_move", "rod");
+    expect(rodClient._fetchMock).toHaveBeenCalled();
+    expect(client._fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("returns policy denial from resolveClient", async () => {
+    const resolveClient = vi.fn().mockImplementation(() => {
+      throw new GraphApiError(
+        "Tool email_move is not permitted for account 'rod'.",
+        "user_input",
+        403,
+      );
+    });
+    const multiTool = createEmailMoveTool({
+      graphClient: client,
+      resolveClient,
+    });
+
+    const result = await multiTool.execute("id", {
+      messageId: "msg-1",
+      destinationFolder: "Archive",
+      account: "rod",
+    });
+    const parsed = parseResult(result);
+
+    expect(parsed.error.category).toBe("user_input");
+    expect(parsed.error.message).toContain("not permitted");
+  });
+
+  it("uses default graphClient when account is omitted and no resolveClient", async () => {
+    await tool.execute("id", {
+      messageId: "msg-1",
+      destinationFolder: "Archive",
+    });
+
+    expect(client._fetchMock).toHaveBeenCalled();
+  });
+
+  it("returns details on error paths", async () => {
+    const result = await tool.execute("id", {});
+    expect(result).toHaveProperty("details");
+  });
+
+  it("returns details on success paths", async () => {
+    const result = await tool.execute("id", {
+      messageId: "msg-1",
+      destinationFolder: "Archive",
+    });
+    expect(result).toHaveProperty("details");
+  });
+});
+
+// ── resolveFolder unit tests ──────────────────────────────────────────────
+
+describe("resolveFolder", () => {
+  it("maps friendly names to Graph identifiers", () => {
+    expect(resolveFolder("inbox")).toBe("Inbox");
+    expect(resolveFolder("sent")).toBe("SentItems");
+    expect(resolveFolder("drafts")).toBe("Drafts");
+    expect(resolveFolder("deleted")).toBe("DeletedItems");
+    expect(resolveFolder("archive")).toBe("Archive");
+    expect(resolveFolder("junk")).toBe("JunkEmail");
+  });
+
+  it("normalizes underscores and hyphens", () => {
+    expect(resolveFolder("Sent_Items")).toBe("SentItems");
+    expect(resolveFolder("deleted-items")).toBe("DeletedItems");
+    expect(resolveFolder("Junk-Email")).toBe("JunkEmail");
+  });
+
+  it("handles combined normalization with spaces", () => {
+    expect(resolveFolder("Sent Items")).toBe("SentItems");
+    expect(resolveFolder("Deleted Items")).toBe("DeletedItems");
+  });
+
+  it("passes through exact well-known names", () => {
+    expect(resolveFolder("SentItems")).toBe("SentItems");
+    expect(resolveFolder("DeletedItems")).toBe("DeletedItems");
+    expect(resolveFolder("JunkEmail")).toBe("JunkEmail");
+  });
+
+  it("passes through raw folder IDs (long alphanumeric strings)", () => {
+    const rawId = "AAMkAGQ0ZTBhZmYxLTg2OGEtNGQxNy05YzFhLTk";
+    expect(resolveFolder(rawId)).toBe(rawId);
+  });
+
+  it("passes through any string > 20 chars matching ID pattern", () => {
+    const longId = "A".repeat(25);
+    expect(resolveFolder(longId)).toBe(longId);
+
+    const base64Id = "abc123+def456=GHIJ789_KLM";
+    expect(resolveFolder(base64Id)).toBe(base64Id);
+  });
+
+  it("returns error for short unknown strings", () => {
+    const result = resolveFolder("bogus");
+    expect(result).toEqual(expect.objectContaining({ error: expect.stringContaining("Unknown folder") }));
+    expect((result as { error: string }).error).toContain("SentItems");
+  });
+
+  it("returns error for empty-ish strings", () => {
+    const result = resolveFolder("");
+    expect(result).toEqual(expect.objectContaining({ error: expect.stringContaining("Unknown folder") }));
   });
 });

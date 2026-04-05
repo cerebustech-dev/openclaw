@@ -201,7 +201,7 @@ export function createGraphClient(params: {
     });
 
     const latency = Date.now() - start;
-    logger.debug(`office365: ${init?.method ?? "GET"} ${path} → ${response.status} (${latency}ms)`);
+    logger.debug?.(`office365: ${init?.method ?? "GET"} ${path} → ${response.status} (${latency}ms)`);
 
     if (response.ok) {
       return response;
