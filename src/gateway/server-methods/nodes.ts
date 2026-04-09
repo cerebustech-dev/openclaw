@@ -12,6 +12,7 @@ import {
 import {
   clearApnsRegistrationIfCurrent,
   loadApnsRegistration,
+  loadApnsRegistrations,
   sendApnsAlert,
   sendApnsBackgroundWake,
   shouldClearStoredApnsRegistration,
@@ -302,63 +303,68 @@ export async function maybeWakeNodeWithApns(
     });
 
     try {
-      const registration = await loadApnsRegistration(nodeId);
-      if (!registration) {
+      const registrations = await loadApnsRegistrations(nodeId);
+      if (registrations.length === 0) {
         return withDuration({ available: false, throttled: false, path: "no-registration" });
       }
 
-      let wakeResult;
-      if (registration.transport === "relay") {
-        const relay = resolveRelayNodePushConfig();
-        if (!relay.ok) {
-          return withDuration({
-            available: false,
-            throttled: false,
-            path: "no-auth",
-            apnsReason: relay.error,
-          });
+      let bestResult: { ok: boolean; status: number; reason?: string } | undefined;
+      // Fan out wake to ALL registered devices for this node
+      for (const registration of registrations) {
+        let wakeResult;
+        try {
+          if (registration.transport === "relay") {
+            const relay = resolveRelayNodePushConfig();
+            if (!relay.ok) {
+              continue; // skip this registration, try others
+            }
+            state.lastWakeAtMs = Date.now();
+            wakeResult = await sendApnsBackgroundWake({
+              registration,
+              nodeId,
+              wakeReason: opts?.wakeReason ?? "node.invoke",
+              relayConfig: relay.relayConfig,
+            });
+          } else {
+            const auth = await resolveDirectNodePushConfig();
+            if (!auth.ok) {
+              continue; // skip this registration, try others
+            }
+            state.lastWakeAtMs = Date.now();
+            wakeResult = await sendApnsBackgroundWake({
+              registration,
+              nodeId,
+              wakeReason: opts?.wakeReason ?? "node.invoke",
+              auth: auth.auth,
+            });
+          }
+          await clearStaleApnsRegistrationIfNeeded(registration, nodeId, wakeResult);
+          // Track best result: prefer first success
+          if (!bestResult || (wakeResult.ok && !bestResult.ok)) {
+            bestResult = wakeResult;
+          }
+        } catch {
+          // Best-effort per registration; continue to others
         }
-        state.lastWakeAtMs = Date.now();
-        wakeResult = await sendApnsBackgroundWake({
-          registration,
-          nodeId,
-          wakeReason: opts?.wakeReason ?? "node.invoke",
-          relayConfig: relay.relayConfig,
-        });
-      } else {
-        const auth = await resolveDirectNodePushConfig();
-        if (!auth.ok) {
-          return withDuration({
-            available: false,
-            throttled: false,
-            path: "no-auth",
-            apnsReason: auth.error,
-          });
-        }
-        state.lastWakeAtMs = Date.now();
-        wakeResult = await sendApnsBackgroundWake({
-          registration,
-          nodeId,
-          wakeReason: opts?.wakeReason ?? "node.invoke",
-          auth: auth.auth,
-        });
       }
-      await clearStaleApnsRegistrationIfNeeded(registration, nodeId, wakeResult);
-      if (!wakeResult.ok) {
+      if (!bestResult) {
+        return withDuration({ available: false, throttled: false, path: "no-auth" });
+      }
+      if (!bestResult.ok) {
         return withDuration({
           available: true,
           throttled: false,
           path: "send-error",
-          apnsStatus: wakeResult.status,
-          apnsReason: wakeResult.reason,
+          apnsStatus: bestResult.status,
+          apnsReason: bestResult.reason,
         });
       }
       return withDuration({
         available: true,
         throttled: false,
         path: "sent",
-        apnsStatus: wakeResult.status,
-        apnsReason: wakeResult.reason,
+        apnsStatus: bestResult.status,
+        apnsReason: bestResult.reason,
       });
     } catch (err) {
       // Best-effort wake only.
@@ -401,55 +407,59 @@ export async function maybeSendNodeWakeNudge(nodeId: string): Promise<NodeWakeNu
     return withDuration({ sent: false, throttled: true, reason: "throttled" });
   }
 
-  const registration = await loadApnsRegistration(nodeId);
-  if (!registration) {
+  const registrations = await loadApnsRegistrations(nodeId);
+  if (registrations.length === 0) {
     return withDuration({ sent: false, throttled: false, reason: "no-registration" });
   }
   try {
-    let result;
-    if (registration.transport === "relay") {
-      const relay = resolveRelayNodePushConfig();
-      if (!relay.ok) {
-        return withDuration({
-          sent: false,
-          throttled: false,
-          reason: "no-auth",
-          apnsReason: relay.error,
-        });
+    let bestResult: { ok: boolean; status: number; reason?: string } | undefined;
+    // Fan out nudge alert to ALL registered devices for this node
+    for (const registration of registrations) {
+      try {
+        let result;
+        if (registration.transport === "relay") {
+          const relay = resolveRelayNodePushConfig();
+          if (!relay.ok) {
+            continue;
+          }
+          result = await sendApnsAlert({
+            registration,
+            nodeId,
+            title: "OpenClaw needs a quick reopen",
+            body: "Tap to reopen OpenClaw and restore the node connection.",
+            relayConfig: relay.relayConfig,
+          });
+        } else {
+          const auth = await resolveDirectNodePushConfig();
+          if (!auth.ok) {
+            continue;
+          }
+          result = await sendApnsAlert({
+            registration,
+            nodeId,
+            title: "OpenClaw needs a quick reopen",
+            body: "Tap to reopen OpenClaw and restore the node connection.",
+            auth: auth.auth,
+          });
+        }
+        await clearStaleApnsRegistrationIfNeeded(registration, nodeId, result);
+        if (!bestResult || (result.ok && !bestResult.ok)) {
+          bestResult = result;
+        }
+      } catch {
+        // Best-effort per registration; continue to others
       }
-      result = await sendApnsAlert({
-        registration,
-        nodeId,
-        title: "OpenClaw needs a quick reopen",
-        body: "Tap to reopen OpenClaw and restore the node connection.",
-        relayConfig: relay.relayConfig,
-      });
-    } else {
-      const auth = await resolveDirectNodePushConfig();
-      if (!auth.ok) {
-        return withDuration({
-          sent: false,
-          throttled: false,
-          reason: "no-auth",
-          apnsReason: auth.error,
-        });
-      }
-      result = await sendApnsAlert({
-        registration,
-        nodeId,
-        title: "OpenClaw needs a quick reopen",
-        body: "Tap to reopen OpenClaw and restore the node connection.",
-        auth: auth.auth,
-      });
     }
-    await clearStaleApnsRegistrationIfNeeded(registration, nodeId, result);
-    if (!result.ok) {
+    if (!bestResult) {
+      return withDuration({ sent: false, throttled: false, reason: "no-auth" });
+    }
+    if (!bestResult.ok) {
       return withDuration({
         sent: false,
         throttled: false,
         reason: "apns-not-ok",
-        apnsStatus: result.status,
-        apnsReason: result.reason,
+        apnsStatus: bestResult.status,
+        apnsReason: bestResult.reason,
       });
     }
     nodeWakeNudgeById.set(nodeId, Date.now());
@@ -457,8 +467,8 @@ export async function maybeSendNodeWakeNudge(nodeId: string): Promise<NodeWakeNu
       sent: true,
       throttled: false,
       reason: "sent",
-      apnsStatus: result.status,
-      apnsReason: result.reason,
+      apnsStatus: bestResult.status,
+      apnsReason: bestResult.reason,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

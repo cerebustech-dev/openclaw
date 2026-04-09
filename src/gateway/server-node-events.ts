@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { normalizeChannelId } from "../channels/plugins/index.js";
 import { createOutboundSendDeps } from "../cli/outbound-send-deps.js";
 import { agentCommandFromIngress } from "../commands/agent.js";
@@ -25,6 +25,100 @@ const VOICE_TRANSCRIPT_DEDUPE_WINDOW_MS = 1500;
 const MAX_RECENT_VOICE_TRANSCRIPTS = 200;
 
 const recentVoiceTranscripts = new Map<string, { fingerprint: string; ts: number }>();
+
+// ---------------------------------------------------------------------------
+// APNs registration rate limiting
+// ---------------------------------------------------------------------------
+
+const APNS_RATE_WINDOW_MS = 60_000;
+const APNS_PER_NODE_LIMIT = 6;
+const APNS_PER_CONNECTION_LIMIT = 10;
+const APNS_GLOBAL_LIMIT = 50;
+
+const apnsNodeRateMap = new Map<string, { count: number; windowStart: number }>();
+const apnsConnectionRateMap = new WeakMap<
+  NodeEventContext,
+  { count: number; windowStart: number }
+>();
+let apnsGlobalRate = { count: 0, windowStart: 0 };
+
+// Track known nodeIds per registration for created-vs-updated detection
+const apnsKnownNodeIds = new Set<string>();
+
+function pruneApnsRateLimitState(now: number): void {
+  for (const [key, entry] of apnsNodeRateMap) {
+    if (now - entry.windowStart >= APNS_RATE_WINDOW_MS) {
+      apnsNodeRateMap.delete(key);
+    }
+  }
+  if (now - apnsGlobalRate.windowStart >= APNS_RATE_WINDOW_MS) {
+    apnsGlobalRate = { count: 0, windowStart: now };
+  }
+}
+
+function checkApnsRegisterRateLimit(
+  nodeId: string,
+  ctx: NodeEventContext,
+  now: number,
+): { allowed: boolean; reason?: string } {
+  pruneApnsRateLimitState(now);
+
+  // Per-nodeId check
+  const nodeEntry = apnsNodeRateMap.get(nodeId);
+  if (nodeEntry && now - nodeEntry.windowStart < APNS_RATE_WINDOW_MS) {
+    if (nodeEntry.count >= APNS_PER_NODE_LIMIT) {
+      return { allowed: false, reason: "per-node rate-limit exceeded" };
+    }
+  }
+
+  // Per-connection check (WeakMap keyed on ctx object identity)
+  const connEntry = apnsConnectionRateMap.get(ctx);
+  if (connEntry && now - connEntry.windowStart < APNS_RATE_WINDOW_MS) {
+    if (connEntry.count >= APNS_PER_CONNECTION_LIMIT) {
+      return { allowed: false, reason: "per-connection rate-limit exceeded" };
+    }
+  }
+
+  // Global circuit breaker
+  if (now - apnsGlobalRate.windowStart < APNS_RATE_WINDOW_MS) {
+    if (apnsGlobalRate.count >= APNS_GLOBAL_LIMIT) {
+      return { allowed: false, reason: "global rate-limit exceeded" };
+    }
+  }
+
+  // All checks passed — increment counters
+  if (nodeEntry && now - nodeEntry.windowStart < APNS_RATE_WINDOW_MS) {
+    nodeEntry.count++;
+  } else {
+    apnsNodeRateMap.set(nodeId, { count: 1, windowStart: now });
+  }
+
+  if (connEntry && now - connEntry.windowStart < APNS_RATE_WINDOW_MS) {
+    connEntry.count++;
+  } else {
+    apnsConnectionRateMap.set(ctx, { count: 1, windowStart: now });
+  }
+
+  if (now - apnsGlobalRate.windowStart < APNS_RATE_WINDOW_MS) {
+    apnsGlobalRate.count++;
+  } else {
+    apnsGlobalRate = { count: 1, windowStart: now };
+  }
+
+  return { allowed: true };
+}
+
+/** Reset all APNs rate-limit state. Exported for testing only. */
+export function _resetApnsRateLimitState(): void {
+  apnsNodeRateMap.clear();
+  apnsGlobalRate = { count: 0, windowStart: 0 };
+  apnsKnownNodeIds.clear();
+  // WeakMap entries for connection tracking are GC'd automatically
+}
+
+function apnsTokenFingerprint(value: string): string {
+  return createHash("sha256").update(value).digest("hex").slice(0, 16);
+}
 
 function normalizeNonEmptyString(value: unknown): string | null {
   if (typeof value !== "string") {
@@ -589,10 +683,25 @@ export const handleNodeEvent = async (ctx: NodeEventContext, nodeId: string, evt
       if (!obj) {
         return;
       }
+
+      // Rate limiting — check before any registration work
+      const now = Date.now();
+      const rateCheck = checkApnsRegisterRateLimit(nodeId, ctx, now);
+      if (!rateCheck.allowed) {
+        ctx.logGateway.warn(
+          `security: apns.register rate-limited node=${nodeId} reason=${rateCheck.reason}`,
+        );
+        return;
+      }
+
       const transport =
         typeof obj.transport === "string" ? obj.transport.trim().toLowerCase() : "direct";
       const topic = typeof obj.topic === "string" ? obj.topic : "";
       const environment = obj.environment;
+
+      // Determine if this nodeId already has a registration (created vs updated)
+      const wasKnown = apnsKnownNodeIds.has(nodeId);
+
       try {
         if (transport === "relay") {
           const gatewayDeviceId =
@@ -604,10 +713,11 @@ export const handleNodeEvent = async (ctx: NodeEventContext, nodeId: string, evt
             );
             return;
           }
-          await registerApnsRegistration({
+          const relayHandle = typeof obj.relayHandle === "string" ? obj.relayHandle : "";
+          const result = await registerApnsRegistration({
             nodeId,
             transport: "relay",
-            relayHandle: typeof obj.relayHandle === "string" ? obj.relayHandle : "",
+            relayHandle,
             sendGrant: typeof obj.sendGrant === "string" ? obj.sendGrant : "",
             installationId: typeof obj.installationId === "string" ? obj.installationId : "",
             topic,
@@ -615,14 +725,29 @@ export const handleNodeEvent = async (ctx: NodeEventContext, nodeId: string, evt
             distribution: obj.distribution,
             tokenDebugSuffix: obj.tokenDebugSuffix,
           });
+          const action =
+            wasKnown || (result as Record<string, unknown>)._wasUpdate ? "updated" : "created";
+          apnsKnownNodeIds.add(nodeId);
+          const fingerprint = apnsTokenFingerprint(relayHandle);
+          ctx.logGateway.warn(
+            `security: apns.register action=${action} node=${nodeId} transport=relay topic=${topic} tokenFingerprint=${fingerprint}`,
+          );
         } else {
-          await registerApnsRegistration({
+          const token = typeof obj.token === "string" ? obj.token : "";
+          const result = await registerApnsRegistration({
             nodeId,
             transport: "direct",
-            token: typeof obj.token === "string" ? obj.token : "",
+            token,
             topic,
             environment,
           });
+          const action =
+            wasKnown || (result as Record<string, unknown>)._wasUpdate ? "updated" : "created";
+          apnsKnownNodeIds.add(nodeId);
+          const fingerprint = apnsTokenFingerprint(token);
+          ctx.logGateway.warn(
+            `security: apns.register action=${action} node=${nodeId} transport=direct topic=${topic} env=${String(environment)} tokenFingerprint=${fingerprint}`,
+          );
         }
       } catch (err) {
         ctx.logGateway.warn(`push apns register failed node=${nodeId}: ${formatForLog(err)}`);

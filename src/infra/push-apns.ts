@@ -24,6 +24,8 @@ export type DirectApnsRegistration = {
   topic: string;
   environment: ApnsEnvironment;
   updatedAtMs: number;
+  registeredAtMs?: number;
+  lastConfirmedAtMs?: number;
 };
 
 export type RelayApnsRegistration = {
@@ -37,6 +39,8 @@ export type RelayApnsRegistration = {
   distribution: "official";
   updatedAtMs: number;
   tokenDebugSuffix?: string;
+  registeredAtMs?: number;
+  lastConfirmedAtMs?: number;
 };
 
 export type ApnsRegistration = DirectApnsRegistration | RelayApnsRegistration;
@@ -83,7 +87,7 @@ type ApnsRequestResponse = { status: number; apnsId?: string; body: string };
 type ApnsRequestSender = (params: ApnsRequestParams) => Promise<ApnsRequestResponse>;
 
 type ApnsRegistrationState = {
-  registrationsByNodeId: Record<string, ApnsRegistration>;
+  registrationsByNodeId: Record<string, ApnsRegistration[]>;
 };
 
 type RegisterDirectApnsParams = {
@@ -118,6 +122,9 @@ const MAX_TOPIC_LENGTH = 255;
 const MAX_APNS_TOKEN_HEX_LENGTH = 512;
 const MAX_RELAY_IDENTIFIER_LENGTH = 256;
 const MAX_SEND_GRANT_LENGTH = 1024;
+const MAX_REGISTRATIONS_PER_NODE = 3;
+const REGISTRATION_HARD_MAX_AGE_MS = 90 * 24 * 60 * 60 * 1000; // 90 days
+const REGISTRATION_SOFT_STALE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 const withLock = createAsyncLock();
 
 let cachedJwt: { cacheKey: string; token: string; expiresAtMs: number } | null = null;
@@ -279,13 +286,23 @@ function normalizeDirectRegistration(
   if (!isValidNodeId(nodeId) || !isValidTopic(topic) || !isLikelyApnsToken(token)) {
     return null;
   }
+  const registeredAtMs =
+    typeof record.registeredAtMs === "number" && Number.isFinite(record.registeredAtMs)
+      ? Math.trunc(record.registeredAtMs)
+      : undefined;
+  const lastConfirmedAtMs =
+    typeof record.lastConfirmedAtMs === "number" && Number.isFinite(record.lastConfirmedAtMs)
+      ? Math.trunc(record.lastConfirmedAtMs)
+      : undefined;
   return {
     nodeId,
-    transport: "direct",
+    transport: "direct" as const,
     token,
     topic,
     environment,
     updatedAtMs,
+    ...(registeredAtMs !== undefined ? { registeredAtMs } : {}),
+    ...(lastConfirmedAtMs !== undefined ? { lastConfirmedAtMs } : {}),
   };
 }
 
@@ -326,9 +343,17 @@ function normalizeRelayRegistration(
   ) {
     return null;
   }
+  const registeredAtMs =
+    typeof record.registeredAtMs === "number" && Number.isFinite(record.registeredAtMs)
+      ? Math.trunc(record.registeredAtMs)
+      : undefined;
+  const lastConfirmedAtMs =
+    typeof record.lastConfirmedAtMs === "number" && Number.isFinite(record.lastConfirmedAtMs)
+      ? Math.trunc(record.lastConfirmedAtMs)
+      : undefined;
   return {
     nodeId,
-    transport: "relay",
+    transport: "relay" as const,
     relayHandle,
     sendGrant,
     installationId,
@@ -337,6 +362,8 @@ function normalizeRelayRegistration(
     distribution,
     updatedAtMs,
     tokenDebugSuffix: normalizeTokenDebugSuffix(record.tokenDebugSuffix),
+    ...(registeredAtMs !== undefined ? { registeredAtMs } : {}),
+    ...(lastConfirmedAtMs !== undefined ? { lastConfirmedAtMs } : {}),
   };
 }
 
@@ -353,9 +380,38 @@ function normalizeStoredRegistration(record: unknown): ApnsRegistration | null {
   return normalizeDirectRegistration(candidate as Partial<DirectApnsRegistration>);
 }
 
+function registrationDedupeKey(reg: ApnsRegistration): string {
+  if (reg.transport === "direct") {
+    return `direct:${reg.topic}:${reg.environment}:${reg.token}`;
+  }
+  return `relay:${reg.installationId}:${reg.topic}:${reg.environment}`;
+}
+
+function pruneExpiredRegistrations(list: ApnsRegistration[], nowMs: number): ApnsRegistration[] {
+  return list.filter((reg) => {
+    // Only prune entries created by the new registration system (have registeredAtMs).
+    // Legacy entries without registeredAtMs predate the expiry system.
+    if (!reg.registeredAtMs) {
+      return true;
+    }
+    const age = nowMs - reg.registeredAtMs;
+    if (age > REGISTRATION_HARD_MAX_AGE_MS) {
+      return false;
+    }
+    // Soft stale only applies when lastConfirmedAtMs is explicitly tracked
+    if (reg.lastConfirmedAtMs) {
+      const staleness = nowMs - reg.lastConfirmedAtMs;
+      if (staleness > REGISTRATION_SOFT_STALE_MS) {
+        return false;
+      }
+    }
+    return true;
+  });
+}
+
 async function loadRegistrationsState(baseDir?: string): Promise<ApnsRegistrationState> {
   const filePath = resolveApnsRegistrationPath(baseDir);
-  const existing = await readJsonFile<ApnsRegistrationState>(filePath);
+  const existing = await readJsonFile<Record<string, unknown>>(filePath);
   if (!existing || typeof existing !== "object") {
     return { registrationsByNodeId: {} };
   }
@@ -363,15 +419,30 @@ async function loadRegistrationsState(baseDir?: string): Promise<ApnsRegistratio
     existing.registrationsByNodeId &&
     typeof existing.registrationsByNodeId === "object" &&
     !Array.isArray(existing.registrationsByNodeId)
-      ? existing.registrationsByNodeId
+      ? (existing.registrationsByNodeId as Record<string, unknown>)
       : {};
-  const normalized: Record<string, ApnsRegistration> = {};
+  const normalized: Record<string, ApnsRegistration[]> = {};
+  const nowMs = Date.now();
   for (const [nodeId, record] of Object.entries(registrations)) {
-    const registration = normalizeStoredRegistration(record);
-    if (registration) {
+    // Legacy support: single object → wrap in array
+    const wasArray = Array.isArray(record);
+    const rawList = wasArray ? record : [record];
+    const entries: ApnsRegistration[] = [];
+    for (const item of rawList) {
+      const registration = normalizeStoredRegistration(item);
+      if (registration) {
+        entries.push(registration);
+      }
+    }
+    if (entries.length > 0) {
       const normalizedNodeId = normalizeNodeId(nodeId);
-      normalized[isValidNodeId(normalizedNodeId) ? normalizedNodeId : registration.nodeId] =
-        registration;
+      const key = isValidNodeId(normalizedNodeId) ? normalizedNodeId : entries[0].nodeId;
+      // Only prune entries that were stored in the new array format;
+      // legacy single-object entries predate the expiry system
+      const result = wasArray ? pruneExpiredRegistrations(entries, nowMs) : entries;
+      if (result.length > 0) {
+        normalized[key] = result;
+      }
     }
   }
   return { registrationsByNodeId: normalized };
@@ -450,6 +521,8 @@ export async function registerApnsRegistration(
         distribution,
         updatedAtMs,
         tokenDebugSuffix: normalizeTokenDebugSuffix(params.tokenDebugSuffix),
+        registeredAtMs: updatedAtMs,
+        lastConfirmedAtMs: updatedAtMs,
       };
     } else {
       const token = normalizeApnsToken(params.token);
@@ -464,10 +537,39 @@ export async function registerApnsRegistration(
         topic,
         environment,
         updatedAtMs,
+        registeredAtMs: updatedAtMs,
+        lastConfirmedAtMs: updatedAtMs,
       };
     }
 
-    state.registrationsByNodeId[nodeId] = next;
+    const existing = state.registrationsByNodeId[nodeId] ?? [];
+    const dedupeKey = registrationDedupeKey(next);
+    const existingIdx = existing.findIndex((r) => registrationDedupeKey(r) === dedupeKey);
+
+    if (existingIdx >= 0) {
+      // Update in place — preserve original registeredAtMs
+      next.registeredAtMs =
+        existing[existingIdx].registeredAtMs ?? existing[existingIdx].updatedAtMs;
+      existing[existingIdx] = next;
+    } else if (existing.length >= MAX_REGISTRATIONS_PER_NODE) {
+      // Evict oldest: sort by updatedAtMs asc, break ties by dedupe key
+      const sorted = existing
+        .map((r, i) => ({ reg: r, idx: i }))
+        .toSorted((a, b) => {
+          const timeDiff = a.reg.updatedAtMs - b.reg.updatedAtMs;
+          if (timeDiff !== 0) {
+            return timeDiff;
+          }
+          return registrationDedupeKey(a.reg).localeCompare(registrationDedupeKey(b.reg));
+        });
+      const evictIdx = sorted[0].idx;
+      existing.splice(evictIdx, 1);
+      existing.push(next);
+    } else {
+      existing.push(next);
+    }
+
+    state.registrationsByNodeId[nodeId] = existing;
     await persistRegistrationsState(state, params.baseDir);
     return next;
   });
@@ -495,7 +597,20 @@ export async function loadApnsRegistration(
     return null;
   }
   const state = await loadRegistrationsState(baseDir);
-  return state.registrationsByNodeId[normalizedNodeId] ?? null;
+  const list = state.registrationsByNodeId[normalizedNodeId] ?? [];
+  return list.length > 0 ? list[0] : null;
+}
+
+export async function loadApnsRegistrations(
+  nodeId: string,
+  baseDir?: string,
+): Promise<ApnsRegistration[]> {
+  const normalizedNodeId = normalizeNodeId(nodeId);
+  if (!normalizedNodeId) {
+    return [];
+  }
+  const state = await loadRegistrationsState(baseDir);
+  return state.registrationsByNodeId[normalizedNodeId] ?? [];
 }
 
 export async function clearApnsRegistration(nodeId: string, baseDir?: string): Promise<boolean> {
@@ -505,7 +620,8 @@ export async function clearApnsRegistration(nodeId: string, baseDir?: string): P
   }
   return await withLock(async () => {
     const state = await loadRegistrationsState(baseDir);
-    if (!(normalizedNodeId in state.registrationsByNodeId)) {
+    const list = state.registrationsByNodeId[normalizedNodeId];
+    if (!list || list.length === 0) {
       return false;
     }
     delete state.registrationsByNodeId[normalizedNodeId];
@@ -550,11 +666,20 @@ export async function clearApnsRegistrationIfCurrent(params: {
   }
   return await withLock(async () => {
     const state = await loadRegistrationsState(params.baseDir);
-    const current = state.registrationsByNodeId[normalizedNodeId];
-    if (!current || !isSameApnsRegistration(current, params.registration)) {
+    const list = state.registrationsByNodeId[normalizedNodeId];
+    if (!list || list.length === 0) {
       return false;
     }
-    delete state.registrationsByNodeId[normalizedNodeId];
+    const idx = list.findIndex((r) => isSameApnsRegistration(r, params.registration));
+    if (idx < 0) {
+      return false;
+    }
+    list.splice(idx, 1);
+    if (list.length === 0) {
+      delete state.registrationsByNodeId[normalizedNodeId];
+    } else {
+      state.registrationsByNodeId[normalizedNodeId] = list;
+    }
     await persistRegistrationsState(state, params.baseDir);
     return true;
   });
