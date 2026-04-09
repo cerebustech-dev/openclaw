@@ -26,6 +26,9 @@ export type DirectApnsRegistration = {
   updatedAtMs: number;
   registeredAtMs?: number;
   lastConfirmedAtMs?: number;
+  deviceSignature?: string;
+  deviceSignedAtMs?: number;
+  signatureVerified?: boolean;
 };
 
 export type RelayApnsRegistration = {
@@ -41,6 +44,9 @@ export type RelayApnsRegistration = {
   tokenDebugSuffix?: string;
   registeredAtMs?: number;
   lastConfirmedAtMs?: number;
+  deviceSignature?: string;
+  deviceSignedAtMs?: number;
+  signatureVerified?: boolean;
 };
 
 export type ApnsRegistration = DirectApnsRegistration | RelayApnsRegistration;
@@ -97,6 +103,8 @@ type RegisterDirectApnsParams = {
   topic: string;
   environment?: unknown;
   baseDir?: string;
+  deviceSignature?: string;
+  deviceSignedAtMs?: number;
 };
 
 type RegisterRelayApnsParams = {
@@ -110,6 +118,8 @@ type RegisterRelayApnsParams = {
   distribution?: unknown;
   tokenDebugSuffix?: unknown;
   baseDir?: string;
+  deviceSignature?: string;
+  deviceSignedAtMs?: number;
 };
 
 type RegisterApnsParams = RegisterDirectApnsParams | RegisterRelayApnsParams;
@@ -391,19 +401,13 @@ function pruneExpiredRegistrations(list: ApnsRegistration[], nowMs: number): Apn
   return list.filter((reg) => {
     // Only prune entries created by the new registration system (have registeredAtMs).
     // Legacy entries without registeredAtMs predate the expiry system.
-    if (!reg.registeredAtMs) {
-      return true;
-    }
+    if (!reg.registeredAtMs) return true;
     const age = nowMs - reg.registeredAtMs;
-    if (age > REGISTRATION_HARD_MAX_AGE_MS) {
-      return false;
-    }
+    if (age > REGISTRATION_HARD_MAX_AGE_MS) return false;
     // Soft stale only applies when lastConfirmedAtMs is explicitly tracked
     if (reg.lastConfirmedAtMs) {
       const staleness = nowMs - reg.lastConfirmedAtMs;
-      if (staleness > REGISTRATION_SOFT_STALE_MS) {
-        return false;
-      }
+      if (staleness > REGISTRATION_SOFT_STALE_MS) return false;
     }
     return true;
   });
@@ -523,6 +527,9 @@ export async function registerApnsRegistration(
         tokenDebugSuffix: normalizeTokenDebugSuffix(params.tokenDebugSuffix),
         registeredAtMs: updatedAtMs,
         lastConfirmedAtMs: updatedAtMs,
+        deviceSignature: params.deviceSignature,
+        deviceSignedAtMs: params.deviceSignedAtMs,
+        // signatureVerified: telemetry placeholder — actual verification not yet implemented
       };
     } else {
       const token = normalizeApnsToken(params.token);
@@ -539,6 +546,9 @@ export async function registerApnsRegistration(
         updatedAtMs,
         registeredAtMs: updatedAtMs,
         lastConfirmedAtMs: updatedAtMs,
+        deviceSignature: params.deviceSignature,
+        deviceSignedAtMs: params.deviceSignedAtMs,
+        // signatureVerified: telemetry placeholder — actual verification not yet implemented
       };
     }
 
@@ -548,18 +558,15 @@ export async function registerApnsRegistration(
 
     if (existingIdx >= 0) {
       // Update in place — preserve original registeredAtMs
-      next.registeredAtMs =
-        existing[existingIdx].registeredAtMs ?? existing[existingIdx].updatedAtMs;
+      next.registeredAtMs = existing[existingIdx].registeredAtMs ?? existing[existingIdx].updatedAtMs;
       existing[existingIdx] = next;
     } else if (existing.length >= MAX_REGISTRATIONS_PER_NODE) {
       // Evict oldest: sort by updatedAtMs asc, break ties by dedupe key
       const sorted = existing
         .map((r, i) => ({ reg: r, idx: i }))
-        .toSorted((a, b) => {
+        .sort((a, b) => {
           const timeDiff = a.reg.updatedAtMs - b.reg.updatedAtMs;
-          if (timeDiff !== 0) {
-            return timeDiff;
-          }
+          if (timeDiff !== 0) return timeDiff;
           return registrationDedupeKey(a.reg).localeCompare(registrationDedupeKey(b.reg));
         });
       const evictIdx = sorted[0].idx;

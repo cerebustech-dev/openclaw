@@ -170,6 +170,7 @@ describe("push.apns.register — rate limiting", () => {
   });
 
   it("rejects registrations when global circuit breaker trips at 51 total", async () => {
+
     // 50 registrations from 50 unique nodes (stays under per-node and per-connection
     // limits by using fresh contexts for each batch of 10)
     let totalCalls = 0;
@@ -190,6 +191,7 @@ describe("push.apns.register — rate limiting", () => {
   });
 
   it("prunes rate limit state after window expiry (no memory leak)", async () => {
+
     // Create entries for many distinct nodeIds
     for (let i = 0; i < 20; i++) {
       const batchCtx = makeCtx();
@@ -282,7 +284,9 @@ describe("push.apns.register — audit logging", () => {
     const allCalls = logWarn.mock.calls.map((c: string[]) => c[0]);
     const auditLog = allCalls.find(
       (msg: string) =>
-        msg.includes("apns.register") && msg.includes(nodeId) && msg.includes("relay"),
+        msg.includes("apns.register") &&
+        msg.includes(nodeId) &&
+        msg.includes("relay"),
     );
 
     expect(auditLog).toBeDefined();
@@ -374,5 +378,203 @@ describe("push.apns.register — audit logging", () => {
       (msg: string) => msg.includes("apns.register") && msg.includes("updated"),
     );
     expect(updatedLog).toBeDefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Step 5a: Identity binding monitor for direct transport
+// ---------------------------------------------------------------------------
+
+describe("push.apns.register — identity binding monitor (direct)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.clearAllMocks();
+    _resetApnsRateLimitState();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("logs telemetry warning when direct registration omits gatewayDeviceId", async () => {
+    const ctx = makeCtx();
+    const logWarn = ctx.logGateway.warn as Mock;
+    const nodeId = "binding-direct-1";
+
+    // Direct registration without gatewayDeviceId
+    await handleNodeEvent(ctx, nodeId, directRegisterEvent());
+
+    const allCalls = logWarn.mock.calls.map((c: string[]) => c[0]);
+    const bindingLog = allCalls.find(
+      (msg: string) =>
+        msg.includes("identity-binding") &&
+        msg.includes(nodeId) &&
+        msg.includes("missing"),
+    );
+
+    // Should log a telemetry warning about missing gatewayDeviceId
+    expect(bindingLog).toBeDefined();
+    // Registration should still succeed (monitor mode, not reject)
+    expect(mockRegister).toHaveBeenCalledTimes(1);
+  });
+
+  it("logs telemetry warning when direct registration has mismatched gatewayDeviceId", async () => {
+    const ctx = makeCtx();
+    const logWarn = ctx.logGateway.warn as Mock;
+    const nodeId = "binding-direct-2";
+
+    const evt: NodeEvent = {
+      event: "push.apns.register",
+      payloadJSON: JSON.stringify({
+        transport: "direct",
+        token: "ABCD1234ABCD1234ABCD1234ABCD1234",
+        topic: "ai.openclaw.ios",
+        environment: "sandbox",
+        gatewayDeviceId: "wrong-device-id",
+      }),
+    };
+
+    await handleNodeEvent(ctx, nodeId, evt);
+
+    const allCalls = logWarn.mock.calls.map((c: string[]) => c[0]);
+    const bindingLog = allCalls.find(
+      (msg: string) =>
+        msg.includes("identity-binding") &&
+        msg.includes(nodeId) &&
+        msg.includes("mismatch"),
+    );
+
+    // Should log a telemetry warning about mismatched gatewayDeviceId
+    expect(bindingLog).toBeDefined();
+    // Registration should still succeed (monitor mode, not reject)
+    expect(mockRegister).toHaveBeenCalledTimes(1);
+  });
+
+  it("does NOT log identity-binding warning when direct registration has correct gatewayDeviceId", async () => {
+    const ctx = makeCtx();
+    const logWarn = ctx.logGateway.warn as Mock;
+    const nodeId = "binding-direct-3";
+
+    const evt: NodeEvent = {
+      event: "push.apns.register",
+      payloadJSON: JSON.stringify({
+        transport: "direct",
+        token: "ABCD1234ABCD1234ABCD1234ABCD1234",
+        topic: "ai.openclaw.ios",
+        environment: "sandbox",
+        gatewayDeviceId: "gateway-device-1", // matches mock
+      }),
+    };
+
+    await handleNodeEvent(ctx, nodeId, evt);
+
+    const allCalls = logWarn.mock.calls.map((c: string[]) => c[0]);
+    const bindingLog = allCalls.find(
+      (msg: string) => msg.includes("identity-binding") && msg.includes(nodeId),
+    );
+
+    // No identity-binding warning when gatewayDeviceId matches
+    expect(bindingLog).toBeUndefined();
+    expect(mockRegister).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Step 6a: Signed registration schema — telemetry
+// ---------------------------------------------------------------------------
+
+describe("push.apns.register — signed registration telemetry", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.clearAllMocks();
+    _resetApnsRateLimitState();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("logs telemetry when registration includes a deviceSignature", async () => {
+    const ctx = makeCtx();
+    const logWarn = ctx.logGateway.warn as Mock;
+    const nodeId = "signed-1";
+
+    const evt: NodeEvent = {
+      event: "push.apns.register",
+      payloadJSON: JSON.stringify({
+        transport: "direct",
+        token: "ABCD1234ABCD1234ABCD1234ABCD1234",
+        topic: "ai.openclaw.ios",
+        environment: "sandbox",
+        deviceSignature: "base64-signature-data",
+        deviceSignedAtMs: 1712700000000,
+      }),
+    };
+
+    await handleNodeEvent(ctx, nodeId, evt);
+
+    const allCalls = logWarn.mock.calls.map((c: string[]) => c[0]);
+    const signLog = allCalls.find(
+      (msg: string) =>
+        msg.includes("apns.register") &&
+        msg.includes(nodeId) &&
+        msg.includes("signed=true"),
+    );
+
+    expect(signLog).toBeDefined();
+    expect(mockRegister).toHaveBeenCalledTimes(1);
+
+    // Verify the signature fields are passed through to registerApnsRegistration
+    const callArgs = mockRegister.mock.calls[0][0];
+    expect(callArgs.deviceSignature).toBe("base64-signature-data");
+    expect(callArgs.deviceSignedAtMs).toBe(1712700000000);
+  });
+
+  it("logs telemetry signed=false when registration omits deviceSignature", async () => {
+    const ctx = makeCtx();
+    const logWarn = ctx.logGateway.warn as Mock;
+    const nodeId = "unsigned-1";
+
+    await handleNodeEvent(ctx, nodeId, directRegisterEvent());
+
+    const allCalls = logWarn.mock.calls.map((c: string[]) => c[0]);
+    const signLog = allCalls.find(
+      (msg: string) =>
+        msg.includes("apns.register") &&
+        msg.includes(nodeId) &&
+        msg.includes("signed=false"),
+    );
+
+    expect(signLog).toBeDefined();
+    // Registration should still succeed (telemetry only)
+    expect(mockRegister).toHaveBeenCalledTimes(1);
+  });
+
+  it("passes deviceSignature fields through to registerApnsRegistration for relay transport", async () => {
+    const ctx = makeCtx();
+    const nodeId = "signed-relay-1";
+
+    const evt: NodeEvent = {
+      event: "push.apns.register",
+      payloadJSON: JSON.stringify({
+        transport: "relay",
+        relayHandle: "relay-handle-123",
+        sendGrant: "grant-abc",
+        installationId: "install-xyz",
+        topic: "ai.openclaw.ios",
+        environment: "production",
+        distribution: "official",
+        gatewayDeviceId: "gateway-device-1",
+        deviceSignature: "relay-sig-data",
+        deviceSignedAtMs: 1712700000000,
+      }),
+    };
+
+    await handleNodeEvent(ctx, nodeId, evt);
+
+    expect(mockRegister).toHaveBeenCalledTimes(1);
+    const callArgs = mockRegister.mock.calls[0][0];
+    expect(callArgs.deviceSignature).toBe("relay-sig-data");
+    expect(callArgs.deviceSignedAtMs).toBe(1712700000000);
   });
 });

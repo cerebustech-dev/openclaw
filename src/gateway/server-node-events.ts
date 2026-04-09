@@ -36,10 +36,7 @@ const APNS_PER_CONNECTION_LIMIT = 10;
 const APNS_GLOBAL_LIMIT = 50;
 
 const apnsNodeRateMap = new Map<string, { count: number; windowStart: number }>();
-const apnsConnectionRateMap = new WeakMap<
-  NodeEventContext,
-  { count: number; windowStart: number }
->();
+const apnsConnectionRateMap = new WeakMap<NodeEventContext, { count: number; windowStart: number }>();
 let apnsGlobalRate = { count: 0, windowStart: 0 };
 
 // Track known nodeIds per registration for created-vs-updated detection
@@ -714,6 +711,16 @@ export const handleNodeEvent = async (ctx: NodeEventContext, nodeId: string, evt
             return;
           }
           const relayHandle = typeof obj.relayHandle === "string" ? obj.relayHandle : "";
+
+          // Step 6a: Extract optional signature fields for relay (telemetry only)
+          const relayDeviceSignature =
+            typeof obj.deviceSignature === "string" ? obj.deviceSignature.trim() : undefined;
+          const relayDeviceSignedAtMs =
+            typeof obj.deviceSignedAtMs === "number" && Number.isFinite(obj.deviceSignedAtMs)
+              ? obj.deviceSignedAtMs
+              : undefined;
+          const relayHasSig = Boolean(relayDeviceSignature);
+
           const result = await registerApnsRegistration({
             nodeId,
             transport: "relay",
@@ -724,29 +731,56 @@ export const handleNodeEvent = async (ctx: NodeEventContext, nodeId: string, evt
             environment,
             distribution: obj.distribution,
             tokenDebugSuffix: obj.tokenDebugSuffix,
+            deviceSignature: relayDeviceSignature,
+            deviceSignedAtMs: relayDeviceSignedAtMs,
           });
-          const action =
-            wasKnown || (result as Record<string, unknown>)._wasUpdate ? "updated" : "created";
+          const action = wasKnown || (result as Record<string, unknown>)._wasUpdate ? "updated" : "created";
           apnsKnownNodeIds.add(nodeId);
           const fingerprint = apnsTokenFingerprint(relayHandle);
           ctx.logGateway.warn(
-            `security: apns.register action=${action} node=${nodeId} transport=relay topic=${topic} tokenFingerprint=${fingerprint}`,
+            `security: apns.register action=${action} node=${nodeId} transport=relay topic=${topic} tokenFingerprint=${fingerprint} signed=${relayHasSig}`,
           );
         } else {
           const token = typeof obj.token === "string" ? obj.token : "";
+
+          // Step 5a: Identity binding monitor — log when gatewayDeviceId is
+          // missing or mismatched for direct transport (monitor mode, no reject)
+          const directGatewayDeviceId =
+            typeof obj.gatewayDeviceId === "string" ? obj.gatewayDeviceId.trim() : "";
+          const currentGatewayDeviceId = loadOrCreateDeviceIdentity().deviceId;
+          if (!directGatewayDeviceId) {
+            ctx.logGateway.warn(
+              `security: identity-binding node=${nodeId} transport=direct status=missing gatewayDeviceId not provided`,
+            );
+          } else if (directGatewayDeviceId !== currentGatewayDeviceId) {
+            ctx.logGateway.warn(
+              `security: identity-binding node=${nodeId} transport=direct status=mismatch`,
+            );
+          }
+
+          // Step 6a: Extract optional signature fields (telemetry only)
+          const deviceSignature =
+            typeof obj.deviceSignature === "string" ? obj.deviceSignature.trim() : undefined;
+          const deviceSignedAtMs =
+            typeof obj.deviceSignedAtMs === "number" && Number.isFinite(obj.deviceSignedAtMs)
+              ? obj.deviceSignedAtMs
+              : undefined;
+          const hasSig = Boolean(deviceSignature);
+
           const result = await registerApnsRegistration({
             nodeId,
             transport: "direct",
             token,
             topic,
             environment,
+            deviceSignature,
+            deviceSignedAtMs,
           });
-          const action =
-            wasKnown || (result as Record<string, unknown>)._wasUpdate ? "updated" : "created";
+          const action = wasKnown || (result as Record<string, unknown>)._wasUpdate ? "updated" : "created";
           apnsKnownNodeIds.add(nodeId);
           const fingerprint = apnsTokenFingerprint(token);
           ctx.logGateway.warn(
-            `security: apns.register action=${action} node=${nodeId} transport=direct topic=${topic} env=${String(environment)} tokenFingerprint=${fingerprint}`,
+            `security: apns.register action=${action} node=${nodeId} transport=direct topic=${topic} env=${String(environment)} tokenFingerprint=${fingerprint} signed=${hasSig}`,
           );
         }
       } catch (err) {
