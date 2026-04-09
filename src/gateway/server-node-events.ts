@@ -712,14 +712,16 @@ export const handleNodeEvent = async (ctx: NodeEventContext, nodeId: string, evt
           }
           const relayHandle = typeof obj.relayHandle === "string" ? obj.relayHandle : "";
 
-          // Step 6a: Extract optional signature fields for relay (telemetry only)
+          // Step 6a: Extract optional signature fields for relay (telemetry only).
+          // Canonical signature payload format (for future 6b enforcement):
+          //   "apns-register-v1|{nodeId}|relay|{relayHandle}|{installationId}|{topic}|{signedAtMs}"
           const relayDeviceSignature =
             typeof obj.deviceSignature === "string" ? obj.deviceSignature.trim() : undefined;
           const relayDeviceSignedAtMs =
             typeof obj.deviceSignedAtMs === "number" && Number.isFinite(obj.deviceSignedAtMs)
               ? obj.deviceSignedAtMs
               : undefined;
-          const relayHasSig = Boolean(relayDeviceSignature);
+          const relaySigStatus = relayDeviceSignature ? "present" : "absent";
 
           const result = await registerApnsRegistration({
             nodeId,
@@ -738,34 +740,42 @@ export const handleNodeEvent = async (ctx: NodeEventContext, nodeId: string, evt
           apnsKnownNodeIds.add(nodeId);
           const fingerprint = apnsTokenFingerprint(relayHandle);
           ctx.logGateway.warn(
-            `security: apns.register action=${action} node=${nodeId} transport=relay topic=${topic} tokenFingerprint=${fingerprint} signed=${relayHasSig}`,
+            `security: apns.register action=${action} node=${nodeId} transport=relay topic=${topic} tokenFingerprint=${fingerprint} signed=${relaySigStatus}`,
           );
         } else {
           const token = typeof obj.token === "string" ? obj.token : "";
 
-          // Step 5a: Identity binding monitor — log when gatewayDeviceId is
-          // missing or mismatched for direct transport (monitor mode, no reject)
+          // Step 5a: Identity binding for direct transport.
+          // If gatewayDeviceId is provided but wrong → reject (same as relay).
+          // If gatewayDeviceId is absent → allow but log (monitor mode for
+          // legacy clients that don't send it yet).
           const directGatewayDeviceId =
             typeof obj.gatewayDeviceId === "string" ? obj.gatewayDeviceId.trim() : "";
           const currentGatewayDeviceId = loadOrCreateDeviceIdentity().deviceId;
+          if (directGatewayDeviceId && directGatewayDeviceId !== currentGatewayDeviceId) {
+            ctx.logGateway.warn(
+              `security: identity-binding node=${nodeId} transport=direct status=rejected gatewayDeviceId mismatch`,
+            );
+            return;
+          }
           if (!directGatewayDeviceId) {
             ctx.logGateway.warn(
               `security: identity-binding node=${nodeId} transport=direct status=missing gatewayDeviceId not provided`,
             );
-          } else if (directGatewayDeviceId !== currentGatewayDeviceId) {
-            ctx.logGateway.warn(
-              `security: identity-binding node=${nodeId} transport=direct status=mismatch`,
-            );
           }
 
-          // Step 6a: Extract optional signature fields (telemetry only)
+          // Step 6a: Extract optional signature fields (telemetry only).
+          // Canonical signature payload format (for future 6b enforcement):
+          //   "apns-register-v1|{nodeId}|{transport}|{token}|{topic}|{signedAtMs}"
+          // Verification not implemented until trust model is locked (6b).
+          // For now: pass through, store, and log presence.
           const deviceSignature =
             typeof obj.deviceSignature === "string" ? obj.deviceSignature.trim() : undefined;
           const deviceSignedAtMs =
             typeof obj.deviceSignedAtMs === "number" && Number.isFinite(obj.deviceSignedAtMs)
               ? obj.deviceSignedAtMs
               : undefined;
-          const hasSig = Boolean(deviceSignature);
+          const sigStatus = deviceSignature ? "present" : "absent";
 
           const result = await registerApnsRegistration({
             nodeId,
@@ -780,7 +790,7 @@ export const handleNodeEvent = async (ctx: NodeEventContext, nodeId: string, evt
           apnsKnownNodeIds.add(nodeId);
           const fingerprint = apnsTokenFingerprint(token);
           ctx.logGateway.warn(
-            `security: apns.register action=${action} node=${nodeId} transport=direct topic=${topic} env=${String(environment)} tokenFingerprint=${fingerprint} signed=${hasSig}`,
+            `security: apns.register action=${action} node=${nodeId} transport=direct topic=${topic} env=${String(environment)} tokenFingerprint=${fingerprint} signed=${sigStatus}`,
           );
         }
       } catch (err) {

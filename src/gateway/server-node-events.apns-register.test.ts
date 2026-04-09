@@ -418,7 +418,7 @@ describe("push.apns.register — identity binding monitor (direct)", () => {
     expect(mockRegister).toHaveBeenCalledTimes(1);
   });
 
-  it("logs telemetry warning when direct registration has mismatched gatewayDeviceId", async () => {
+  it("rejects direct registration when gatewayDeviceId is present but wrong", async () => {
     const ctx = makeCtx();
     const logWarn = ctx.logGateway.warn as Mock;
     const nodeId = "binding-direct-2";
@@ -441,13 +441,13 @@ describe("push.apns.register — identity binding monitor (direct)", () => {
       (msg: string) =>
         msg.includes("identity-binding") &&
         msg.includes(nodeId) &&
-        msg.includes("mismatch"),
+        msg.includes("rejected"),
     );
 
-    // Should log a telemetry warning about mismatched gatewayDeviceId
+    // Should log rejection for mismatched gatewayDeviceId
     expect(bindingLog).toBeDefined();
-    // Registration should still succeed (monitor mode, not reject)
-    expect(mockRegister).toHaveBeenCalledTimes(1);
+    // Registration should be REJECTED — registerApnsRegistration NOT called
+    expect(mockRegister).toHaveBeenCalledTimes(0);
   });
 
   it("does NOT log identity-binding warning when direct registration has correct gatewayDeviceId", async () => {
@@ -494,7 +494,7 @@ describe("push.apns.register — signed registration telemetry", () => {
     vi.useRealTimers();
   });
 
-  it("logs telemetry when registration includes a deviceSignature", async () => {
+  it("logs signed=present when registration includes a deviceSignature", async () => {
     const ctx = makeCtx();
     const logWarn = ctx.logGateway.warn as Mock;
     const nodeId = "signed-1";
@@ -518,7 +518,7 @@ describe("push.apns.register — signed registration telemetry", () => {
       (msg: string) =>
         msg.includes("apns.register") &&
         msg.includes(nodeId) &&
-        msg.includes("signed=true"),
+        msg.includes("signed=present"),
     );
 
     expect(signLog).toBeDefined();
@@ -530,7 +530,7 @@ describe("push.apns.register — signed registration telemetry", () => {
     expect(callArgs.deviceSignedAtMs).toBe(1712700000000);
   });
 
-  it("logs telemetry signed=false when registration omits deviceSignature", async () => {
+  it("logs signed=absent when registration omits deviceSignature", async () => {
     const ctx = makeCtx();
     const logWarn = ctx.logGateway.warn as Mock;
     const nodeId = "unsigned-1";
@@ -542,7 +542,7 @@ describe("push.apns.register — signed registration telemetry", () => {
       (msg: string) =>
         msg.includes("apns.register") &&
         msg.includes(nodeId) &&
-        msg.includes("signed=false"),
+        msg.includes("signed=absent"),
     );
 
     expect(signLog).toBeDefined();
