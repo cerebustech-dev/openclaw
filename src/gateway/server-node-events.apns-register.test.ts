@@ -205,7 +205,6 @@ describe("push.apns.register — rate limiting", () => {
     // We verify this indirectly: a new registration should succeed even though
     // the global counter previously had 20 entries. If state wasn't pruned,
     // continued registrations would hit the global limit sooner.
-    const _freshCtx = makeCtx();
     for (let i = 0; i < 50; i++) {
       const innerCtx = makeCtx();
       await handleNodeEvent(innerCtx, `post-prune-node-${i}`, directRegisterEvent());
