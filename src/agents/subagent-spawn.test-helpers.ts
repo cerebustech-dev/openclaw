@@ -192,6 +192,7 @@ export async function loadSubagentSpawnModuleForTest(params: {
 
   vi.doMock("./subagent-registry.js", () => ({
     countActiveRunsForSession: () => 0,
+    listSubagentRunsForRequester: () => [],
     registerSubagentRun:
       params.registerSubagentRunMock ?? vi.fn((_record: Record<string, unknown>) => undefined),
     resetSubagentRegistryForTests,
