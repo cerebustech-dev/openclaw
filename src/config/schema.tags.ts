@@ -1,4 +1,5 @@
 import { compileSafeRegex, MAX_GLOB_PATTERN_LENGTH } from "../security/safe-regex.js";
+import { normalizeLowercaseStringOrEmpty } from "../shared/string-coerce.js";
 import type { ConfigUiHint, ConfigUiHints } from "./schema.hints.js";
 
 export const CONFIG_TAGS = [
@@ -87,7 +88,7 @@ const AUTOMATION_PATH_PATTERN = /(cron|heartbeat|schedule|onstart|watchdebounce)
 const AUTH_KEYWORD_PATTERN = /(token|password|secret|api[_.-]?key|credential|oauth)/i;
 
 function normalizeTag(tag: string): ConfigTag | null {
-  const normalized = tag.trim().toLowerCase() as ConfigTag;
+  const normalized = normalizeLowercaseStringOrEmpty(tag) as ConfigTag;
   return CONFIG_TAGS.includes(normalized) ? normalized : null;
 }
 
@@ -100,6 +101,18 @@ function normalizeTags(tags: ReadonlyArray<string>): ConfigTag[] {
     }
   }
   return [...out].toSorted((a, b) => TAG_PRIORITY[a] - TAG_PRIORITY[b]);
+}
+
+function collectUnknownTags(tags: ReadonlyArray<string>): string[] {
+  const out = new Set<string>();
+  for (const tag of tags) {
+    const normalized = normalizeLowercaseStringOrEmpty(tag);
+    if (!normalized || normalizeTag(normalized)) {
+      continue;
+    }
+    out.add(normalized);
+  }
+  return [...out];
 }
 
 function patternToRegExp(pattern: string): RegExp | null {
@@ -134,7 +147,7 @@ function addTags(set: Set<ConfigTag>, tags: ReadonlyArray<ConfigTag>): void {
 }
 
 export function deriveTagsForPath(path: string, hint?: ConfigUiHint): ConfigTag[] {
-  const lowerPath = path.toLowerCase();
+  const lowerPath = normalizeLowercaseStringOrEmpty(path);
   const override = resolveOverride(path);
   if (override) {
     return normalizeTags(override);
@@ -185,7 +198,10 @@ export function applyDerivedTags(hints: ConfigUiHints): ConfigUiHints {
   for (const [path, hint] of Object.entries(hints)) {
     const existingTags = Array.isArray(hint?.tags) ? hint.tags : [];
     const derivedTags = deriveTagsForPath(path, hint);
-    const tags = normalizeTags([...derivedTags, ...existingTags]);
+    const tags = [
+      ...normalizeTags([...derivedTags, ...existingTags]),
+      ...collectUnknownTags(existingTags),
+    ];
     next[path] = { ...hint, tags };
   }
   return next;
