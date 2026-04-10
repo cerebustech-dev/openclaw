@@ -43,8 +43,8 @@ describe("security audit gateway exposure findings", () => {
         name: "generic insecure debug flags",
         cfg: {
           hooks: {
-            gmail: { allowUnsafeExternalContent: true },
-            mappings: [{ allowUnsafeExternalContent: true }],
+            gmail: { dangerouslyAllowUnsafeExternalContent: true },
+            mappings: [{ dangerouslyAllowUnsafeExternalContent: true }],
           },
           tools: {
             exec: {
@@ -55,8 +55,8 @@ describe("security audit gateway exposure findings", () => {
           },
         } satisfies OpenClawConfig,
         expectedDangerousDetails: [
-          "hooks.gmail.allowUnsafeExternalContent=true",
-          "hooks.mappings[0].allowUnsafeExternalContent=true",
+          "hooks.gmail.dangerouslyAllowUnsafeExternalContent=true",
+          "hooks.mappings[0].dangerouslyAllowUnsafeExternalContent=true",
           "tools.exec.applyPatch.workspaceOnly=false",
         ],
       },

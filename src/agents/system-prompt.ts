@@ -104,7 +104,12 @@ function buildProjectContextSection(params: {
     lines.push("");
   }
   for (const file of params.files) {
-    lines.push(`## ${file.path}`, "", file.content, "");
+    const wrappedContent = wrapExternalContent(file.content, {
+      source: "unknown",
+      subject: file.path,
+      includeWarning: false,
+    });
+    lines.push(`## ${file.path}`, "", wrappedContent, "");
   }
   return lines;
 }

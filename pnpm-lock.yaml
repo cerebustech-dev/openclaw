@@ -133,6 +133,9 @@ importers:
       discord-api-types:
         specifier: ^0.38.44
         version: 0.38.44
+      dompurify:
+        specifier: ^3.3.3
+        version: 3.3.3
       dotenv:
         specifier: ^17.4.0
         version: 17.4.0
@@ -865,6 +868,8 @@ importers:
       '@openclaw/plugin-sdk':
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
+
+  extensions/office365: {}
 
   extensions/ollama:
     devDependencies:

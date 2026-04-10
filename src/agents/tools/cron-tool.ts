@@ -37,7 +37,7 @@ const CRON_FLAT_PAYLOAD_KEYS = [
   "thinking",
   "timeoutSeconds",
   "lightContext",
-  "allowUnsafeExternalContent",
+  "dangerouslyAllowUnsafeExternalContent",
 ] as const;
 const CRON_RECOVERABLE_OBJECT_KEYS: ReadonlySet<string> = new Set([
   "name",
@@ -78,7 +78,7 @@ function cronPayloadObjectSchema(params: { toolsAllow: TSchema }) {
       thinking: Type.Optional(Type.String({ description: "Thinking level override" })),
       timeoutSeconds: Type.Optional(Type.Number()),
       lightContext: Type.Optional(Type.Boolean()),
-      allowUnsafeExternalContent: Type.Optional(Type.Boolean()),
+      dangerouslyAllowUnsafeExternalContent: Type.Optional(Type.Boolean()),
       fallbacks: Type.Optional(Type.Array(Type.String(), { description: "Fallback model ids" })),
       toolsAllow: params.toolsAllow,
     },

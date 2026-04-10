@@ -373,10 +373,10 @@ async function prepareCronRunContext(params: {
   const base = `[cron:${input.job.id} ${input.job.name}] ${input.message}`.trim();
   const isExternalHook =
     hookExternalContentSource !== undefined || isExternalHookSession(baseSessionKey);
-  const allowUnsafeExternalContent =
-    agentPayload?.allowUnsafeExternalContent === true ||
-    (isGmailHook && input.cfg.hooks?.gmail?.allowUnsafeExternalContent === true);
-  const shouldWrapExternal = isExternalHook && !allowUnsafeExternalContent;
+  const dangerouslyAllowUnsafeExternalContent =
+    agentPayload?.dangerouslyAllowUnsafeExternalContent === true ||
+    (isGmailHook && input.cfg.hooks?.gmail?.dangerouslyAllowUnsafeExternalContent === true);
+  const shouldWrapExternal = isExternalHook && !dangerouslyAllowUnsafeExternalContent;
   let commandBody: string;
 
   if (isExternalHook) {

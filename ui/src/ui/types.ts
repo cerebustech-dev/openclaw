@@ -519,7 +519,7 @@ export type CronPayload =
       fallbacks?: string[];
       thinking?: string;
       timeoutSeconds?: number;
-      allowUnsafeExternalContent?: boolean;
+      dangerouslyAllowUnsafeExternalContent?: boolean;
       lightContext?: boolean;
       deliver?: boolean;
       channel?: string;

@@ -95,7 +95,7 @@ describe("CronToolSchema", () => {
   it("job.payload exposes kind, text, message, model, thinking and extras", () => {
     expect(keysAt(CronToolSchema as Record<string, unknown>, "job.payload")).toEqual(
       [
-        "allowUnsafeExternalContent",
+        "dangerouslyAllowUnsafeExternalContent",
         "fallbacks",
         "kind",
         "lightContext",
@@ -116,7 +116,7 @@ describe("CronToolSchema", () => {
   it("patch.payload exposes agentTurn fallback overrides", () => {
     expect(keysAt(CronToolSchema as Record<string, unknown>, "patch.payload")).toEqual(
       [
-        "allowUnsafeExternalContent",
+        "dangerouslyAllowUnsafeExternalContent",
         "fallbacks",
         "kind",
         "lightContext",

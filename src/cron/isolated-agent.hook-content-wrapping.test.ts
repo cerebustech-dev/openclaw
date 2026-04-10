@@ -86,7 +86,7 @@ describe("runCronIsolatedAgentTurn hook content wrapping", () => {
         cfgOverrides: {
           hooks: {
             gmail: {
-              allowUnsafeExternalContent: true,
+              dangerouslyAllowUnsafeExternalContent: true,
             },
           },
         },
@@ -112,7 +112,7 @@ describe("runCronIsolatedAgentTurn hook content wrapping", () => {
         cfgOverrides: {
           hooks: {
             gmail: {
-              allowUnsafeExternalContent: true,
+              dangerouslyAllowUnsafeExternalContent: true,
             },
           },
         },
