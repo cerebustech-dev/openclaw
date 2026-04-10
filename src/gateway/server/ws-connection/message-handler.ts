@@ -655,6 +655,7 @@ export function attachGatewayWsMessageHandler(params: {
           const signedAt = device.signedAt;
           if (
             typeof signedAt !== "number" ||
+            !Number.isFinite(signedAt) ||
             Math.abs(Date.now() - signedAt) > DEVICE_SIGNATURE_SKEW_MS
           ) {
             rejectDeviceAuthInvalid("device-signature-stale", "device signature expired");
