@@ -486,6 +486,9 @@ public actor GatewayNodeSession {
             "nodeId": AnyCodable(request.nodeId),
             "ok": AnyCodable(response.ok),
         ]
+        if let idempotencyKey = request.idempotencyKey {
+            params["idempotencyKey"] = AnyCodable(idempotencyKey)
+        }
         if let payloadJSON = response.payloadJSON {
             params["payloadJSON"] = AnyCodable(payloadJSON)
         }

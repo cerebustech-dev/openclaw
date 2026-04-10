@@ -289,6 +289,11 @@ public actor GatewayChannelActor {
 
     public func connect() async throws {
         if self.connected, self.task?.state == .running { return }
+        if !self.isSchemeAllowed() {
+            throw NSError(domain: "Gateway", code: 10, userInfo: [
+                NSLocalizedDescriptionKey: "plaintext WebSocket (ws://) is not allowed to non-loopback hosts",
+            ])
+        }
         if self.isConnecting {
             try await withCheckedThrowingContinuation { cont in
                 self.connectWaiters.append(cont)
@@ -316,7 +321,7 @@ public actor GatewayChannelActor {
             if let authError = error as? GatewayConnectAuthError {
                 wrapped = authError
             } else {
-                wrapped = self.wrap(error, context: "connect to gateway @ \(self.url.absoluteString)")
+                wrapped = self.wrap(error, context: "connect to gateway @ \(self.sanitizedURLString())")
             }
             self.connected = false
             self.task?.cancel(with: .goingAway, reason: nil)
@@ -907,6 +912,29 @@ public actor GatewayChannelActor {
             return false
         }
         return authError.detail == .authDeviceTokenMismatch
+    }
+
+    private func isSchemeAllowed() -> Bool {
+        let scheme = self.url.scheme?.lowercased() ?? ""
+        if scheme == "wss" { return true }
+        if scheme == "ws", let host = self.url.host {
+            return LoopbackHost.isLoopback(host)
+        }
+        return false
+    }
+
+    private func sanitizedURLString() -> String {
+        guard var components = URLComponents(url: self.url, resolvingAgainstBaseURL: false) else {
+            return "<redacted-url>"
+        }
+        if let items = components.queryItems, !items.isEmpty {
+            components.queryItems = items.map { item in
+                URLQueryItem(name: item.name, value: "<redacted>")
+            }
+        }
+        components.user = nil
+        components.password = nil
+        return components.string ?? "<redacted-url>"
     }
 
     private func isTrustedDeviceRetryEndpoint() -> Bool {
