@@ -166,6 +166,7 @@ public actor GatewayChannelActor {
     private let logger = Logger(subsystem: "ai.openclaw", category: "gateway")
     private var task: WebSocketTaskBox?
     private var pending: [String: CheckedContinuation<GatewayFrame, Error>] = [:]
+    private var connectionEpoch: UInt64 = 0
     private var connected = false
     private var isConnecting = false
     private var connectWaiters: [CheckedContinuation<Void, Error>] = []
@@ -316,7 +317,7 @@ public actor GatewayChannelActor {
             if let authError = error as? GatewayConnectAuthError {
                 wrapped = authError
             } else {
-                wrapped = self.wrap(error, context: "connect to gateway @ \(self.url.absoluteString)")
+                wrapped = self.wrap(error, context: "connect to gateway @ \(self.url.host ?? \"unknown\")")
             }
             self.connected = false
             self.task?.cancel(with: .goingAway, reason: nil)
@@ -329,7 +330,9 @@ public actor GatewayChannelActor {
             self.logger.error("gateway ws connect failed \(wrapped.localizedDescription, privacy: .public)")
             throw wrapped
         }
-        self.listen()
+        self.connectionEpoch &+= 1
+        let epoch = self.connectionEpoch
+        self.listen(epoch: epoch)
         self.connected = true
         self.reconnectPausedForAuthFailure = false
         self.backoffMs = 500
@@ -596,22 +599,26 @@ public actor GatewayChannelActor {
         }
     }
 
-    private func listen() {
+    private func listen(epoch: UInt64) {
         self.task?.receive { [weak self] result in
             guard let self else { return }
             switch result {
             case let .failure(err):
-                Task { await self.handleReceiveFailure(err) }
+                Task { await self.handleReceiveFailure(err, epoch: epoch) }
             case let .success(msg):
                 Task {
                     await self.handle(msg)
-                    await self.listen()
+                    await self.listen(epoch: epoch)
                 }
             }
         }
     }
 
-    private func handleReceiveFailure(_ err: Error) async {
+    private func handleReceiveFailure(_ err: Error, epoch: UInt64) async {
+        guard epoch == self.connectionEpoch else {
+            self.logger.info("gateway ignoring stale receive failure from epoch \(epoch)")
+            return
+        }
         let wrapped = self.wrap(err, context: "gateway receive")
         self.logger.error("gateway ws receive failed \(wrapped.localizedDescription, privacy: .public)")
         self.connected = false
@@ -630,7 +637,9 @@ public actor GatewayChannelActor {
         }
         guard let data else { return }
         guard let frame = try? self.decoder.decode(GatewayFrame.self, from: data) else {
-            self.logger.error("gateway decode failed")
+            let preview = data.prefix(64)
+            let typeHint = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["type"] as? String
+            self.logger.error("gateway decode failed type=\(typeHint ?? \"unknown\", privacy: .public) bytes=\(data.count, privacy: .public)")
             return
         }
         switch frame {
