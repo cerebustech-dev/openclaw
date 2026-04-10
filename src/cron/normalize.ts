@@ -1,3 +1,4 @@
+import { migrateLegacyCronPayload } from "../commands/doctor-cron-payload-migration.js";
 import { sanitizeAgentId } from "../routing/session-key.js";
 import {
   normalizeLowercaseStringOrEmpty,
@@ -240,6 +241,7 @@ function coercePayload(payload: UnknownRecord) {
     delete next.thinking;
     delete next.timeoutSeconds;
     delete next.lightContext;
+    delete next.dangerouslyAllowUnsafeExternalContent;
     delete next.allowUnsafeExternalContent;
     delete next.toolsAllow;
   } else if (next.kind === "agentTurn") {
