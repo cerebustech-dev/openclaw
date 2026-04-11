@@ -16,6 +16,7 @@ private let chatUILogger = Logger(subsystem: "ai.openclaw", category: "OpenClawC
 @Observable
 public final class OpenClawChatViewModel {
     public static let defaultModelSelectionID = "__default__"
+    public static let maxAttachmentBytes = 5_000_000
 
     public private(set) var messages: [OpenClawChatMessage] = []
     public var input: String = ""
@@ -217,6 +218,7 @@ public final class OpenClawChatViewModel {
     // MARK: - Internals
 
     private func bootstrap() async {
+        guard !self.isLoading else { return }
         self.isLoading = true
         self.errorText = nil
         self.healthOK = false
@@ -517,6 +519,15 @@ public final class OpenClawChatViewModel {
                 name: nil,
                 arguments: nil),
         ]
+        // Safety-net: reject oversized attachments at send time (defense-in-depth).
+        for att in self.attachments {
+            guard att.data.count <= Self.maxAttachmentBytes else {
+                self.errorText = "Attachment \(att.fileName) exceeds size limit"
+                self.isSending = false
+                return
+            }
+        }
+
         let encodedAttachments = self.attachments.map { att -> OpenClawChatAttachmentPayload in
             OpenClawChatAttachmentPayload(
                 type: att.type,
@@ -1001,6 +1012,13 @@ public final class OpenClawChatViewModel {
         }
     }
 
+    // Test support: expose matchesCurrentSessionKey for security audit verification.
+    #if DEBUG
+    static func testMatchesCurrentSessionKey(incoming: String, current: String) -> Bool {
+        matchesCurrentSessionKey(incoming: incoming, current: current)
+    }
+    #endif
+
     private static func matchesCurrentSessionKey(incoming: String, current: String) -> Bool {
         let incomingNormalized = incoming.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let currentNormalized = current.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -1129,7 +1147,7 @@ public final class OpenClawChatViewModel {
     }
 
     private func addImageAttachment(url: URL?, data: Data, fileName: String, mimeType: String) async {
-        if data.count > 5_000_000 {
+        if data.count > Self.maxAttachmentBytes {
             self.errorText = "Attachment \(fileName) exceeds 5 MB limit"
             return
         }
