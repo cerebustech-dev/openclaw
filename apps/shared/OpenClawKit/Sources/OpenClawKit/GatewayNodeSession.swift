@@ -496,6 +496,9 @@ public actor GatewayNodeSession {
                 "message": error.message,
             ])
         }
+        if let idempotencyKey = request.idempotencyKey {
+            params["idempotencyKey"] = AnyCodable(idempotencyKey)
+        }
         do {
             try await channel.send(method: "node.invoke.result", params: params)
         } catch {

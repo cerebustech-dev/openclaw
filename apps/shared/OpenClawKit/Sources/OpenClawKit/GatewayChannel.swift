@@ -299,6 +299,23 @@ public actor GatewayChannelActor {
         self.isConnecting = true
         defer { self.isConnecting = false }
 
+        // V1 fix: Reject plaintext WebSocket to non-loopback hosts.
+        if self.url.scheme?.lowercased() == "ws" {
+            let host = self.url.host ?? ""
+            if !host.isEmpty, !LoopbackHost.isLoopback(host) {
+                let err = NSError(
+                    domain: "Gateway",
+                    code: 10,
+                    userInfo: [NSLocalizedDescriptionKey: "plaintext WebSocket (ws://) not allowed to non-loopback host"])
+                let waiters = self.connectWaiters
+                self.connectWaiters.removeAll()
+                for waiter in waiters {
+                    waiter.resume(throwing: err)
+                }
+                throw err
+            }
+        }
+
         self.task?.cancel(with: .goingAway, reason: nil)
         self.task = self.session.makeWebSocketTask(url: self.url)
         self.task?.resume()
@@ -317,7 +334,7 @@ public actor GatewayChannelActor {
             if let authError = error as? GatewayConnectAuthError {
                 wrapped = authError
             } else {
-                wrapped = self.wrap(error, context: "connect to gateway @ \(self.url.host ?? \"unknown\")")
+                wrapped = self.wrap(error, context: "connect to gateway @ \(self.sanitizedURLString())")
             }
             self.connected = false
             self.task?.cancel(with: .goingAway, reason: nil)
@@ -957,6 +974,16 @@ public actor GatewayChannelActor {
             )
             throw error
         }
+    }
+
+    private nonisolated func sanitizedURLString() -> String {
+        var components = URLComponents(url: self.url, resolvingAgainstBaseURL: false)
+        components?.user = nil
+        components?.password = nil
+        if let items = components?.queryItems {
+            components?.queryItems = items.map { URLQueryItem(name: $0.name, value: "***") }
+        }
+        return components?.string ?? self.url.host ?? "unknown"
     }
 
     private func failPending(_ error: Error) async {
