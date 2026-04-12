@@ -1,11 +1,16 @@
+import { randomBytes } from "node:crypto";
 import { writeFileSync, readFileSync, renameSync, mkdirSync, chmodSync, unlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { randomBytes } from "node:crypto";
-import { fetchWithSsrFGuard } from "openclaw/plugin-sdk";
 import type { PluginLogger } from "openclaw/plugin-sdk";
-import { GraphApiError, type GraphErrorCategory, type Office365Config, type Office365Credential } from "./types.js";
-import { refreshMicrosoftTokens } from "./oauth.js";
+import { fetchWithSsrFGuard } from "openclaw/plugin-sdk/ssrf-runtime";
 import { ACCOUNT_ID_RE } from "./accounts.js";
+import { refreshMicrosoftTokens } from "./oauth.js";
+import {
+  GraphApiError,
+  type GraphErrorCategory,
+  type Office365Config,
+  type Office365Credential,
+} from "./types.js";
 
 // ── Constants ───────────────────────────────────────────────────────────────
 
@@ -19,7 +24,11 @@ const TRANSIENT_RETRY_DELAY_MS = 1_000;
 
 export type GraphClient = {
   fetch(path: string, init?: RequestInit): Promise<Response>;
-  fetchJson<T>(path: string, query?: Record<string, string>, extraHeaders?: Record<string, string>): Promise<T>;
+  fetchJson<T>(
+    path: string,
+    query?: Record<string, string>,
+    extraHeaders?: Record<string, string>,
+  ): Promise<T>;
   setCredential(cred: Office365Credential): void;
 };
 
@@ -43,7 +52,9 @@ function writeCredentialFile(path: string, cred: Office365Credential, logger?: P
     chmodSync(tmpPath, 0o600);
   } catch (err) {
     if (process.platform === "win32") {
-      logger?.warn("office365: chmod not supported on Windows, file permissions may be broader than intended");
+      logger?.warn(
+        "office365: chmod not supported on Windows, file permissions may be broader than intended",
+      );
     } else {
       throw err;
     }
@@ -55,9 +66,15 @@ function readCredentialFile(path: string): Office365Credential | null {
   try {
     const raw = readFileSync(path, "utf8");
     const parsed = JSON.parse(raw) as Office365Credential;
-    if (typeof parsed.access !== "string" || !parsed.access) return null;
-    if (typeof parsed.refresh !== "string" || !parsed.refresh) return null;
-    if (typeof parsed.expires !== "number" || parsed.expires <= 0) return null;
+    if (typeof parsed.access !== "string" || !parsed.access) {
+      return null;
+    }
+    if (typeof parsed.refresh !== "string" || !parsed.refresh) {
+      return null;
+    }
+    if (typeof parsed.expires !== "number" || parsed.expires <= 0) {
+      return null;
+    }
     return parsed;
   } catch {
     return null;
@@ -82,7 +99,8 @@ async function graphFetch(url: string, init: RequestInit): Promise<Response> {
   });
   try {
     // Null-body status codes (204, 304) must have null body per Fetch spec
-    const isNullBody = response.status === 204 || response.status === 205 || response.status === 304;
+    const isNullBody =
+      response.status === 204 || response.status === 205 || response.status === 304;
     const body = isNullBody ? null : await response.arrayBuffer();
     return new Response(body, {
       status: response.status,
@@ -97,11 +115,21 @@ async function graphFetch(url: string, init: RequestInit): Promise<Response> {
 // ── Error classification ────────────────────────────────────────────────────
 
 function classifyHttpError(status: number): GraphErrorCategory {
-  if (status === 401) return "auth";
-  if (status === 403) return "permission";
-  if (status === 404) return "not_found";
-  if (status === 429) return "throttle";
-  if (status >= 500) return "transient";
+  if (status === 401) {
+    return "auth";
+  }
+  if (status === 403) {
+    return "permission";
+  }
+  if (status === 404) {
+    return "not_found";
+  }
+  if (status === 429) {
+    return "throttle";
+  }
+  if (status >= 500) {
+    return "transient";
+  }
   return "user_input";
 }
 
@@ -182,11 +210,7 @@ export function createGraphClient(params: {
     return refreshInFlight;
   }
 
-  async function doFetch(
-    path: string,
-    init?: RequestInit,
-    isRetry = false,
-  ): Promise<Response> {
+  async function doFetch(path: string, init?: RequestInit, isRetry = false): Promise<Response> {
     const token = await resolveAccessToken();
     const url = `${GRAPH_BASE}${path}`;
     const start = Date.now();
@@ -196,12 +220,14 @@ export function createGraphClient(params: {
       headers: {
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
-        ...init?.headers,
+        ...(init?.headers as Record<string, string>),
       },
     });
 
     const latency = Date.now() - start;
-    logger.debug?.(`office365: ${init?.method ?? "GET"} ${path} → ${response.status} (${latency}ms)`);
+    logger.debug?.(
+      `office365: ${init?.method ?? "GET"} ${path} → ${response.status} (${latency}ms)`,
+    );
 
     if (response.ok) {
       return response;
@@ -238,7 +264,8 @@ export function createGraphClient(params: {
     let message = `Graph API ${path} failed (${response.status})`;
 
     if (category === "permission") {
-      message += ". Check that the Azure app has the required scopes (Mail.ReadWrite, Calendars.ReadWrite).";
+      message +=
+        ". Check that the Azure app has the required scopes (Mail.ReadWrite, Calendars.ReadWrite).";
     } else if (category === "not_found") {
       message += ". The requested resource was not found.";
     } else if (errorText) {
@@ -256,10 +283,12 @@ export function createGraphClient(params: {
       query?: Record<string, string>,
       extraHeaders?: Record<string, string>,
     ): Promise<T> {
-      const qs = query && Object.keys(query).length > 0
-        ? `?${new URLSearchParams(query).toString()}`
-        : "";
-      const response = await doFetch(`${path}${qs}`, extraHeaders ? { headers: extraHeaders } : undefined);
+      const qs =
+        query && Object.keys(query).length > 0 ? `?${new URLSearchParams(query).toString()}` : "";
+      const response = await doFetch(
+        `${path}${qs}`,
+        extraHeaders ? { headers: extraHeaders } : undefined,
+      );
       return (await response.json()) as T;
     },
 
