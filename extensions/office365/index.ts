@@ -1,26 +1,8 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import {
-  buildOauthProviderAuthResult,
-  type OpenClawPluginApi,
-  type ProviderAuthContext,
-} from "openclaw/plugin-sdk";
-import { loginMicrosoftOAuth, refreshMicrosoftTokens } from "./src/oauth.js";
-import type { GraphClient } from "./src/graph-client.js";
+import { type OpenClawPluginApi, type ProviderAuthContext } from "openclaw/plugin-sdk";
+import { buildOauthProviderAuthResult } from "openclaw/plugin-sdk/provider-auth";
 import { createAccountClients } from "./src/account-clients.js";
-import { createEmailListTool } from "./src/tools/email-list.js";
-import { createEmailReadTool } from "./src/tools/email-read.js";
-import { createEmailSendTool } from "./src/tools/email-send.js";
-import { createEmailReplyTool } from "./src/tools/email-reply.js";
-import { createEmailSearchTool } from "./src/tools/email-search.js";
-import { createEmailAttachmentReadTool } from "./src/tools/email-attachment-read.js";
-import { createCalendarListTool } from "./src/tools/calendar-list.js";
-import { createCalendarCreateTool } from "./src/tools/calendar-create.js";
-import { createCalendarUpdateTool } from "./src/tools/calendar-update.js";
-import { createCalendarDeleteTool } from "./src/tools/calendar-delete.js";
-import { createEmailMoveTool } from "./src/tools/email-move.js";
-import { GraphApiError } from "./src/types.js";
-import type { Office365AccountConfig, Office365Config } from "./src/types.js";
 import {
   isMultiAccountMode,
   listOffice365AccountIds,
@@ -29,6 +11,21 @@ import {
   isToolPermittedForAccount,
   validateAccountsConfig,
 } from "./src/accounts.js";
+import type { GraphClient } from "./src/graph-client.js";
+import { loginMicrosoftOAuth, refreshMicrosoftTokens } from "./src/oauth.js";
+import { createCalendarCreateTool } from "./src/tools/calendar-create.js";
+import { createCalendarDeleteTool } from "./src/tools/calendar-delete.js";
+import { createCalendarListTool } from "./src/tools/calendar-list.js";
+import { createCalendarUpdateTool } from "./src/tools/calendar-update.js";
+import { createEmailAttachmentReadTool } from "./src/tools/email-attachment-read.js";
+import { createEmailListTool } from "./src/tools/email-list.js";
+import { createEmailMoveTool } from "./src/tools/email-move.js";
+import { createEmailReadTool } from "./src/tools/email-read.js";
+import { createEmailReplyTool } from "./src/tools/email-reply.js";
+import { createEmailSearchTool } from "./src/tools/email-search.js";
+import { createEmailSendTool } from "./src/tools/email-send.js";
+import { GraphApiError } from "./src/types.js";
+import type { Office365AccountConfig, Office365Config } from "./src/types.js";
 
 // ── Constants ───────────────────────────────────────────────────────────────
 
@@ -48,8 +45,12 @@ function parseConfig(raw: Record<string, unknown> | undefined): Office365Config 
   const cfg = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
 
   const str = (val: unknown, envFallback: string | undefined): string => {
-    if (typeof val === "string") return val;
-    if (typeof envFallback === "string") return envFallback;
+    if (typeof val === "string") {
+      return val;
+    }
+    if (typeof envFallback === "string") {
+      return envFallback;
+    }
     return "";
   };
 
@@ -103,9 +104,7 @@ const office365Plugin = {
     if (isMultiAccountMode(config)) {
       const errors = validateAccountsConfig(config);
       if (errors.length > 0) {
-        throw new Error(
-          `Office365 multi-account config invalid:\n  - ${errors.join("\n  - ")}`,
-        );
+        throw new Error(`Office365 multi-account config invalid:\n  - ${errors.join("\n  - ")}`);
       }
     }
 
@@ -131,8 +130,8 @@ const office365Plugin = {
 
       // Policy check
       if (isMultiAccountMode(config) && !isToolPermittedForAccount(toolName, targetId, config)) {
-        const permitted = listOffice365AccountIds(config).filter(
-          (id) => isToolPermittedForAccount(toolName, id, config),
+        const permitted = listOffice365AccountIds(config).filter((id) =>
+          isToolPermittedForAccount(toolName, id, config),
         );
         throw new GraphApiError(
           `Tool ${toolName} is not permitted for account '${targetId}'. Allowed accounts: [${permitted.map((a) => `'${a}'`).join(", ")}].`,
@@ -165,9 +164,7 @@ const office365Plugin = {
               kind: "oauth",
               run: async (ctx: ProviderAuthContext) => {
                 if (!resolved.config.clientId || !resolved.config.tenantId) {
-                  throw new Error(
-                    `Missing clientId or tenantId for account '${accountId}'.`,
-                  );
+                  throw new Error(`Missing clientId or tenantId for account '${accountId}'.`);
                 }
 
                 const spin = ctx.prompter.progress(
@@ -180,8 +177,7 @@ const office365Plugin = {
                       openUrl: ctx.openUrl,
                       log: (msg) => ctx.runtime.log(msg),
                       note: ctx.prompter.note,
-                      prompt: async (message) =>
-                        String(await ctx.prompter.text({ message })),
+                      prompt: async (message) => String(await ctx.prompter.text({ message })),
                       progress: spin,
                     },
                     resolved.config,
@@ -254,17 +250,18 @@ const office365Plugin = {
         const lines: string[] = [];
         for (const accountId of listOffice365AccountIds(config)) {
           const resolved = resolveOffice365Account({ config, accountId });
-          const credFile = accountId === "default"
-            ? join(stateDir, "office365-credentials.json")
-            : join(stateDir, `office365-credentials-${accountId}.json`);
+          const credFile =
+            accountId === "default"
+              ? join(stateDir, "office365-credentials.json")
+              : join(stateDir, `office365-credentials-${accountId}.json`);
           const authed = existsSync(credFile);
-          const toolsList = resolved.tools.length > 0
-            ? resolved.tools.join(", ")
-            : "all";
+          const toolsList = resolved.tools.length > 0 ? resolved.tools.join(", ") : "all";
           if (authed) {
             lines.push(`${resolved.name} (${accountId}): authenticated (${toolsList})`);
           } else {
-            lines.push(`${resolved.name} (${accountId}): not authenticated — run \`openclaw auth\` and select microsoft-graph-${accountId}`);
+            lines.push(
+              `${resolved.name} (${accountId}): not authenticated — run \`openclaw auth\` and select microsoft-graph-${accountId}`,
+            );
           }
         }
         return {
@@ -293,9 +290,7 @@ const office365Plugin = {
                 );
               }
 
-              const spin = ctx.prompter.progress(
-                "Starting Microsoft 365 OAuth…",
-              );
+              const spin = ctx.prompter.progress("Starting Microsoft 365 OAuth…");
               try {
                 const result = await loginMicrosoftOAuth(
                   {
@@ -303,8 +298,7 @@ const office365Plugin = {
                     openUrl: ctx.openUrl,
                     log: (msg) => ctx.runtime.log(msg),
                     note: ctx.prompter.note,
-                    prompt: async (message) =>
-                      String(await ctx.prompter.text({ message })),
+                    prompt: async (message) => String(await ctx.prompter.text({ message })),
                     progress: spin,
                   },
                   config,

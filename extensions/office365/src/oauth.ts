@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import { createServer } from "node:http";
-import { fetchWithSsrFGuard } from "openclaw/plugin-sdk";
+import { fetchWithSsrFGuard } from "openclaw/plugin-sdk/ssrf-runtime";
 import type { Office365Config, Office365Credential } from "./types.js";
 
 // ── Constants ───────────────────────────────────────────────────────────────
@@ -16,8 +16,12 @@ const WELL_KNOWN_TENANTS = new Set(["common", "organizations", "consumers"]);
 const GUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export function validateTenantId(tenantId: string): void {
-  if (WELL_KNOWN_TENANTS.has(tenantId)) return;
-  if (GUID_RE.test(tenantId)) return;
+  if (WELL_KNOWN_TENANTS.has(tenantId)) {
+    return;
+  }
+  if (GUID_RE.test(tenantId)) {
+    return;
+  }
   throw new Error(
     `Invalid tenantId "${tenantId}". Must be a GUID (8-4-4-4-12 hex) or one of: common, organizations, consumers.`,
   );
@@ -91,8 +95,7 @@ export function parseCallbackInput(
       url = new URL(`http://localhost/${qs}`);
     } catch {
       return {
-        error:
-          "Could not parse input. Paste the full redirect URL from your browser address bar.",
+        error: "Could not parse input. Paste the full redirect URL from your browser address bar.",
       };
     }
   }
@@ -138,9 +141,7 @@ async function waitForLocalCallback(params: {
         "redirectUri must use localhost, 127.0.0.1, or ::1.",
     );
   }
-  const port = redirectUrl.port
-    ? Number.parseInt(redirectUrl.port, 10)
-    : CALLBACK_PORT;
+  const port = redirectUrl.port ? Number.parseInt(redirectUrl.port, 10) : CALLBACK_PORT;
   const expectedPath = redirectUrl.pathname || CALLBACK_PATH;
 
   return new Promise<{ code: string; state: string }>((resolve, reject) => {
@@ -148,10 +149,7 @@ async function waitForLocalCallback(params: {
 
     const server = createServer((req, res) => {
       try {
-        const requestUrl = new URL(
-          req.url ?? "/",
-          `http://${hostname}:${port}`,
-        );
+        const requestUrl = new URL(req.url ?? "/", `http://${hostname}:${port}`);
         if (requestUrl.pathname !== expectedPath) {
           res.statusCode = 404;
           res.setHeader("Content-Type", "text/plain");
@@ -174,8 +172,7 @@ async function waitForLocalCallback(params: {
           }
           res.statusCode = 400;
           res.setHeader("Content-Type", "text/plain");
-          const desc =
-            requestUrl.searchParams.get("error_description") ?? error;
+          const desc = requestUrl.searchParams.get("error_description") ?? error;
           res.end(`Authentication failed: ${desc}`);
           finish(new Error(`OAuth error from Microsoft: ${desc}`));
           return;
@@ -206,16 +203,11 @@ async function waitForLocalCallback(params: {
         );
         finish(undefined, { code, state });
       } catch (err) {
-        finish(
-          err instanceof Error ? err : new Error("OAuth callback failed"),
-        );
+        finish(err instanceof Error ? err : new Error("OAuth callback failed"));
       }
     });
 
-    const finish = (
-      err?: Error,
-      result?: { code: string; state: string },
-    ) => {
+    const finish = (err?: Error, result?: { code: string; state: string }) => {
       if (timeout) {
         clearTimeout(timeout);
         timeout = null;
@@ -233,33 +225,22 @@ async function waitForLocalCallback(params: {
     };
 
     server.once("error", (err) => {
-      finish(
-        err instanceof Error ? err : new Error("OAuth callback server error"),
-      );
+      finish(err instanceof Error ? err : new Error("OAuth callback server error"));
     });
 
     server.listen(port, hostname, () => {
-      params.onProgress?.(
-        `Waiting for OAuth callback on ${params.redirectUri}…`,
-      );
+      params.onProgress?.(`Waiting for OAuth callback on ${params.redirectUri}…`);
     });
 
     timeout = setTimeout(() => {
-      finish(
-        new Error(
-          "OAuth callback timeout. Run `openclaw auth` to try again.",
-        ),
-      );
+      finish(new Error("OAuth callback timeout. Run `openclaw auth` to try again."));
     }, params.timeoutMs);
   });
 }
 
 // ── Token exchange ──────────────────────────────────────────────────────────
 
-async function fetchWithTimeout(
-  url: string,
-  init: RequestInit,
-): Promise<Response> {
+async function fetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
   const { response, release } = await fetchWithSsrFGuard({
     url,
     init,
@@ -302,9 +283,7 @@ export async function exchangeCodeForTokens(
 
   if (!response.ok) {
     const errorText = await response.text().catch(() => "");
-    throw new Error(
-      `Token exchange failed (${response.status}): ${errorText}`,
-    );
+    throw new Error(`Token exchange failed (${response.status}): ${errorText}`);
   }
 
   const data = (await response.json()) as {
@@ -364,9 +343,7 @@ export async function refreshMicrosoftTokens(
         "Refresh token expired or revoked. Run `openclaw auth` to re-authenticate with Microsoft 365.",
       );
     }
-    throw new Error(
-      `Token refresh failed (${response.status}): ${errorText}`,
-    );
+    throw new Error(`Token refresh failed (${response.status}): ${errorText}`);
   }
 
   const data = (await response.json()) as {
@@ -385,9 +362,7 @@ export async function refreshMicrosoftTokens(
 
 // ── User info ───────────────────────────────────────────────────────────────
 
-export async function getUserInfo(
-  accessToken: string,
-): Promise<string | undefined> {
+export async function getUserInfo(accessToken: string): Promise<string | undefined> {
   try {
     const response = await fetchWithTimeout(GRAPH_ME_URL, {
       headers: { Authorization: `Bearer ${accessToken}` },
@@ -418,13 +393,11 @@ export type MicrosoftOAuthContext = {
 };
 
 function shouldUseManualFlow(isRemote: boolean): boolean {
-  if (isRemote) return true;
+  if (isRemote) {
+    return true;
+  }
   // WSL2 cannot open Windows browser reliably in all setups
-  if (
-    process.platform === "linux" &&
-    !process.env.DISPLAY &&
-    !process.env.WAYLAND_DISPLAY
-  ) {
+  if (process.platform === "linux" && !process.env.DISPLAY && !process.env.WAYLAND_DISPLAY) {
     return true;
   }
   return false;
@@ -462,9 +435,7 @@ export async function loginMicrosoftOAuth(
     ctx.progress.update("OAuth URL ready");
     ctx.log(`\nOpen this URL in your LOCAL browser:\n\n${authUrl}\n`);
     ctx.progress.update("Waiting for you to paste the callback URL…");
-    const callbackInput = await ctx.prompt(
-      "Paste the full redirect URL here: ",
-    );
+    const callbackInput = await ctx.prompt("Paste the full redirect URL here: ");
     const parsed = parseCallbackInput(callbackInput, state);
     if ("error" in parsed) {
       throw new Error(parsed.error);
@@ -498,13 +469,9 @@ export async function loginMicrosoftOAuth(
         err.message.includes("port") ||
         err.message.includes("listen"))
     ) {
-      ctx.progress.update(
-        "Local callback server failed. Switching to manual mode…",
-      );
+      ctx.progress.update("Local callback server failed. Switching to manual mode…");
       ctx.log(`\nOpen this URL in your LOCAL browser:\n\n${authUrl}\n`);
-      const callbackInput = await ctx.prompt(
-        "Paste the full redirect URL here: ",
-      );
+      const callbackInput = await ctx.prompt("Paste the full redirect URL here: ");
       const parsed = parseCallbackInput(callbackInput, state);
       if ("error" in parsed) {
         throw new Error(parsed.error, { cause: err });
