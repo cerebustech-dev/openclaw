@@ -82,6 +82,13 @@ public struct OpenClawChatView: View {
             .frame(maxHeight: .infinity, alignment: .top)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .environment(\.openURL, OpenURLAction { url in
+            let allowed: Set<String> = ["https", "http", "mailto"]
+            guard let scheme = url.scheme?.lowercased(), allowed.contains(scheme) else {
+                return .discarded
+            }
+            return .systemAction
+        })
         .onAppear { self.viewModel.load() }
         .sheet(isPresented: self.$showSessions) {
             if self.showsSessionSwitcher {
