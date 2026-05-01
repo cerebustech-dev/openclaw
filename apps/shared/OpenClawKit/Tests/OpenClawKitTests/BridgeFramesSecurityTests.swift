@@ -200,17 +200,17 @@ struct D4_TypeConfusion {
 @Suite("D5: Invoke Dispatch Safety")
 struct D5_InvokeDispatch {
     @Test func duplicateResponseResolvesOnlyOnce() async {
-        var invokeCount = 0
+        let counter = InvokeCountBox()
         let request = BridgeInvokeRequest(id: "dup-test", command: "x")
         let response = await GatewayNodeSession.invokeWithTimeout(
             request: request,
             timeoutMs: 100,
             onInvoke: { req in
-                invokeCount += 1
+                counter.increment()
                 return BridgeInvokeResponse(id: req.id, ok: true)
             })
         #expect(response.ok == true)
-        #expect(invokeCount == 1) // onInvoke called exactly once
+        #expect(counter.value == 1) // onInvoke called exactly once
     }
 
     @Test func timeoutWinsOverSlowInvoke() async {
@@ -327,5 +327,20 @@ struct D8_EncodingBoundary {
         let decoded = try JSONDecoder().decode(BridgeRPCRequest.self, from: data)
         #expect(decoded.method == "../admin/delete")
         // Validation is server-side — client sends what the app layer dictates
+    }
+}
+
+private final class InvokeCountBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+    func increment() {
+        self.lock.lock()
+        defer { self.lock.unlock() }
+        self.count += 1
+    }
+    var value: Int {
+        self.lock.lock()
+        defer { self.lock.unlock() }
+        return self.count
     }
 }

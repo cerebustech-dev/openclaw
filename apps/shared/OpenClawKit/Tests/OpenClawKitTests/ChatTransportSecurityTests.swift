@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import OpenClawKit
+@testable import OpenClawChatUI
 import OpenClawProtocol
 
 // MARK: - D1: Attachment Size Validation
