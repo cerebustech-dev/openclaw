@@ -187,6 +187,7 @@ struct D4_EventStreamLogging {
 // MARK: - D5: Session Key Aliasing — Accepted Risk
 
 @Suite("D5: Session Key Aliasing — Accepted Risk")
+@MainActor
 struct D5_SessionKeyAliasing {
     @Test func sameKeyMatches() {
         #expect(OpenClawChatViewModel.testMatchesCurrentSessionKey(
