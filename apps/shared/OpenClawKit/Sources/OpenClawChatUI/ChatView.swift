@@ -82,6 +82,12 @@ public struct OpenClawChatView: View {
             .frame(maxHeight: .infinity, alignment: .top)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .environment(\.openURL, OpenURLAction { url in
+            switch ChatLinkAllowlist.decision(for: url) {
+            case .allow:   return .systemAction
+            case .discard: return .discarded
+            }
+        })
         .onAppear { self.viewModel.load() }
         .sheet(isPresented: self.$showSessions) {
             if self.showsSessionSwitcher {
