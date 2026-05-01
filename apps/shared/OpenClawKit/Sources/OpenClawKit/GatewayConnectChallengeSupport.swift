@@ -4,7 +4,7 @@ import OpenClawProtocol
 public enum GatewayConnectChallengeSupport {
     /// Minimum nonce length for connect challenge. Nonces shorter than this
     /// are rejected to prevent trivially guessable challenge-response values.
-    static let minimumNonceLength = 8
+    public static let minimumNonceLength = 8
 
     public static func nonce(from payload: [String: OpenClawProtocol.AnyCodable]?) -> String? {
         guard let nonce = payload?["nonce"]?.value as? String else { return nil }

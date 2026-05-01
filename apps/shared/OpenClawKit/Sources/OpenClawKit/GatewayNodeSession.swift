@@ -82,8 +82,9 @@ public actor GatewayNodeSession {
         onInvoke: @escaping @Sendable (BridgeInvokeRequest) async -> BridgeInvokeResponse
     ) async -> BridgeInvokeResponse {
         let timeoutLogger = Logger(subsystem: "ai.openclaw", category: "node.gateway")
+        let maxSafeMs = Int.max / 1_000_000
         let timeout: Int = {
-            if let timeoutMs { return max(0, timeoutMs) }
+            if let timeoutMs { return min(max(0, timeoutMs), maxSafeMs) }
             return Self.defaultInvokeTimeoutMs
         }()
         guard timeout > 0 else {
@@ -497,6 +498,9 @@ public actor GatewayNodeSession {
                 "code": error.code.rawValue,
                 "message": error.message,
             ])
+        }
+        if let idempotencyKey = request.idempotencyKey {
+            params["idempotencyKey"] = AnyCodable(idempotencyKey)
         }
         do {
             try await channel.send(method: "node.invoke.result", params: params)

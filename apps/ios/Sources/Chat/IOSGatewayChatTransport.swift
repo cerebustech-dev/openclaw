@@ -106,7 +106,7 @@ struct IOSGatewayChatTransport: OpenClawChatTransport, Sendable {
     func requestHealth(timeoutMs: Int) async throws -> Bool {
         let seconds = max(1, Int(ceil(Double(timeoutMs) / 1000.0)))
         let res = try await self.gateway.request(method: "health", paramsJSON: nil, timeoutSeconds: seconds)
-        return (try? JSONDecoder().decode(OpenClawGatewayHealthOK.self, from: res))?.ok ?? true
+        return (try? JSONDecoder().decode(OpenClawGatewayHealthOK.self, from: res))?.ok ?? false
     }
 
     func events() -> AsyncStream<OpenClawChatTransportEvent> {
@@ -124,26 +124,30 @@ struct IOSGatewayChatTransport: OpenClawChatTransport, Sendable {
                         guard let payload = evt.payload else { break }
                         let ok = (try? GatewayPayloadDecoding.decode(
                             payload,
-                            as: OpenClawGatewayHealthOK.self))?.ok ?? true
+                            as: OpenClawGatewayHealthOK.self))?.ok ?? false
                         continuation.yield(.health(ok: ok))
                     case "chat":
                         guard let payload = evt.payload else { break }
-                        if let chatPayload = try? GatewayPayloadDecoding.decode(
-                            payload,
-                            as: OpenClawChatEventPayload.self)
-                        {
+                        do {
+                            let chatPayload = try GatewayPayloadDecoding.decode(
+                                payload,
+                                as: OpenClawChatEventPayload.self)
                             continuation.yield(.chat(chatPayload))
+                        } catch {
+                            Self.logger.error("chat event decode failed: \(error.localizedDescription, privacy: .public)")
                         }
                     case "agent":
                         guard let payload = evt.payload else { break }
-                        if let agentPayload = try? GatewayPayloadDecoding.decode(
-                            payload,
-                            as: OpenClawAgentEventPayload.self)
-                        {
+                        do {
+                            let agentPayload = try GatewayPayloadDecoding.decode(
+                                payload,
+                                as: OpenClawAgentEventPayload.self)
                             continuation.yield(.agent(agentPayload))
+                        } catch {
+                            Self.logger.error("agent event decode failed: \(error.localizedDescription, privacy: .public)")
                         }
                     default:
-                        break
+                        Self.logger.warning("chat transport: unrecognized event \(evt.event, privacy: .public)")
                     }
                 }
             }
