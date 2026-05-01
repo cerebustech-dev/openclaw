@@ -1,8 +1,5 @@
 import crypto from "node:crypto";
 import { promises as fs } from "node:fs";
-// TODO(driftlane-bzn): pass-B reconciliation — re-introduce rate-limit imports
-// (DEFAULT_SUBAGENT_MAX_SPAWNS_PER_MINUTE, listSubagentRunsForRequester) once
-// the spawn rate-limit production wiring is rebuilt against upstream's refactor.
 import path from "node:path";
 import { isAcpRuntimeSpawnAvailable } from "../acp/runtime/availability.js";
 import type { SessionEntry } from "../config/sessions/types.js";
@@ -28,7 +25,11 @@ import {
 import { resolveSubagentCapabilities } from "./subagent-capabilities.js";
 import { getSubagentDepthFromSessionStore } from "./subagent-depth.js";
 import { buildSubagentInitialUserMessage } from "./subagent-initial-user-message.js";
-import { countActiveRunsForSession, registerSubagentRun } from "./subagent-registry.js";
+import {
+  countActiveRunsForSession,
+  listSubagentRunsForRequester,
+  registerSubagentRun,
+} from "./subagent-registry.js";
 import { resolveSubagentSpawnAcceptedNote } from "./subagent-spawn-accepted-note.js";
 import { resolveSubagentTargetPolicy } from "./subagent-target-policy.js";
 export {
@@ -46,6 +47,7 @@ import {
   AGENT_LANE_SUBAGENT,
   DEFAULT_SUBAGENT_MAX_CHILDREN_PER_AGENT,
   DEFAULT_SUBAGENT_MAX_SPAWN_DEPTH,
+  DEFAULT_SUBAGENT_MAX_SPAWNS_PER_MINUTE,
   buildSubagentSystemPrompt,
   callGateway,
   emitSessionLifecycleEvent,
@@ -619,9 +621,39 @@ async function ensureThreadBindingForSubagentSpawn(params: {
   }
 }
 
-// TODO(driftlane-bzn): pass-B reconciliation — re-introduce
-// `checkSubagentSpawnRateLimit` (driftlane spawn rate-limit hardening) and
-// wire it into the spawn entry point. Dropped here for compile-only Pass A.
+const RATE_LIMIT_WINDOW_MS = 60_000;
+
+/**
+ * Driftlane spawn rate-limit hardening: rejects when a single requester
+ * session has issued ≥ `maxSpawnsPerMinute` subagent spawns within the
+ * sliding 60s window. Counts `createdAt` timestamps from SubagentRunRecord
+ * entries returned by `listSubagentRunsForRequester`.
+ */
+export function checkSubagentSpawnRateLimit(
+  requesterSessionKey: string,
+  opts?: {
+    maxSpawnsPerMinute?: number;
+    nowMs?: number;
+  },
+): string | undefined {
+  const maxSpawns = opts?.maxSpawnsPerMinute ?? DEFAULT_SUBAGENT_MAX_SPAWNS_PER_MINUTE;
+  const now = opts?.nowMs ?? Date.now();
+  const windowStart = now - RATE_LIMIT_WINDOW_MS;
+
+  const runs = listSubagentRunsForRequester(requesterSessionKey);
+  let recentCount = 0;
+  for (const run of runs) {
+    if (run.createdAt >= windowStart) {
+      recentCount += 1;
+    }
+  }
+
+  if (recentCount >= maxSpawns) {
+    return `sessions_spawn rate limit exceeded (${recentCount} spawns in the last 60s, max: ${maxSpawns})`;
+  }
+  return undefined;
+}
+
 function hasRoutableDeliveryOrigin(
   origin?: DeliveryContext,
 ): origin is DeliveryContext & { channel: string; to: string } {
@@ -718,9 +750,17 @@ export async function spawnSubagentDirect(
     };
   }
 
-  // TODO(driftlane-bzn): pass-B reconciliation — re-introduce
-  // checkSubagentSpawnRateLimit here once the rate-limit production wiring is
-  // rebuilt against upstream's spawn-flow refactor.
+  const maxSpawnsPerMinute =
+    cfg.agents?.defaults?.subagents?.maxSpawnsPerMinute ?? DEFAULT_SUBAGENT_MAX_SPAWNS_PER_MINUTE;
+  const rateLimitError = checkSubagentSpawnRateLimit(requesterInternalKey, {
+    maxSpawnsPerMinute,
+  });
+  if (rateLimitError) {
+    return {
+      status: "forbidden",
+      error: rateLimitError,
+    };
+  }
 
   const requesterAgentId = normalizeAgentId(
     ctx.requesterAgentIdOverride ?? parseAgentSessionKey(requesterInternalKey)?.agentId,

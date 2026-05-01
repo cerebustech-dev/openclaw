@@ -173,6 +173,7 @@ export async function loadSubagentSpawnModuleForTest(params: {
     normalizeThinkLevel: (level: unknown) => normalizeOptionalString(level),
     DEFAULT_SUBAGENT_MAX_CHILDREN_PER_AGENT: 5,
     DEFAULT_SUBAGENT_MAX_SPAWN_DEPTH: 3,
+    DEFAULT_SUBAGENT_MAX_SPAWNS_PER_MINUTE: 10,
     ADMIN_SCOPE: "operator.admin",
     AGENT_LANE_SUBAGENT: "subagent",
     getRuntimeConfig: () =>

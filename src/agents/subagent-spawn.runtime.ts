@@ -2,6 +2,7 @@ export { formatThinkingLevels, normalizeThinkLevel } from "../auto-reply/thinkin
 export {
   DEFAULT_SUBAGENT_MAX_CHILDREN_PER_AGENT,
   DEFAULT_SUBAGENT_MAX_SPAWN_DEPTH,
+  DEFAULT_SUBAGENT_MAX_SPAWNS_PER_MINUTE,
 } from "../config/agent-limits.js";
 export { getRuntimeConfig } from "../config/config.js";
 export { mergeSessionEntry, updateSessionStore } from "../config/sessions.js";
