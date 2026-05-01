@@ -7,6 +7,28 @@ function asConfig(value: unknown): OpenClawConfig {
 }
 
 describe("collectEnabledInsecureOrDangerousFlags", () => {
+  it("flags gateway.auth.mode=none as dangerous", () => {
+    expect(
+      collectEnabledInsecureOrDangerousFlagsFromContracts(
+        asConfig({ gateway: { auth: { mode: "none" } } }),
+      ),
+    ).toContain("gateway.auth.mode=none");
+  });
+
+  it("does not flag gateway.auth.mode=token", () => {
+    expect(
+      collectEnabledInsecureOrDangerousFlagsFromContracts(
+        asConfig({ gateway: { auth: { mode: "token" } } }),
+      ),
+    ).not.toContain("gateway.auth.mode=none");
+  });
+
+  it("does not flag when gateway.auth config is absent", () => {
+    expect(collectEnabledInsecureOrDangerousFlagsFromContracts(asConfig({}))).not.toContain(
+      "gateway.auth.mode=none",
+    );
+  });
+
   it("collects manifest-declared dangerous plugin config values", () => {
     expect(
       collectEnabledInsecureOrDangerousFlagsFromContracts(
