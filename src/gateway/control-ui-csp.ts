@@ -44,8 +44,12 @@ export function buildControlUiCspHeader(opts?: { inlineScriptHashes?: string[] }
     "frame-ancestors 'none'",
     scriptSrc,
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-    "img-src 'self' data: https:",
+    "img-src 'self' data: blob:",
     "font-src 'self' https://fonts.gstatic.com",
+    "worker-src 'self'",
+    // TODO(driftlane-afi): pass-B reconciliation — re-evaluate ws:/wss: in
+    // connect-src. Fork's audit removed the wildcards; upstream still emits
+    // them. Compile-only: tentatively keeping fork's tightened policy.
     "connect-src 'self'",
   ].join("; ");
 }

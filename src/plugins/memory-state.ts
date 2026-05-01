@@ -1,6 +1,6 @@
-import type { OpenClawConfig } from "../config/config.js";
 import type { MemoryCitationsMode } from "../config/types.memory.js";
-import type { MemorySearchManager } from "../memory-host-sdk/runtime-files.js";
+import type { OpenClawConfig } from "../config/types.openclaw.js";
+import type { MemorySearchManager } from "../memory-host-sdk/host/types.js";
 
 export type MemoryPromptSectionBuilder = (params: {
   availableTools: Set<string>;
@@ -68,6 +68,7 @@ export type MemoryFlushPlan = {
   softThresholdTokens: number;
   forceFlushTranscriptBytes: number;
   reserveTokensFloor: number;
+  model?: string;
   prompt: string;
   systemPrompt: string;
   relativePath: string;
@@ -97,7 +98,7 @@ export type MemoryPluginRuntime = {
   getMemorySearchManager(params: {
     cfg: OpenClawConfig;
     agentId: string;
-    purpose?: "default" | "status";
+    purpose?: "default" | "status" | "cli";
   }): Promise<{
     manager: RegisteredMemorySearchManager | null;
     error?: string;

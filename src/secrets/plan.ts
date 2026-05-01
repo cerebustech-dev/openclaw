@@ -3,11 +3,7 @@ import { SecretProviderSchema } from "../config/zod-schema.core.js";
 import { isValidExecSecretRefId, isValidSecretProviderAlias } from "./ref-contract.js";
 import { isBlockedObjectKey } from "../infra/prototype-keys.js";
 import { parseDotPath, toDotPath } from "./shared.js";
-import {
-  isKnownSecretTargetType,
-  resolvePlanTargetAgainstRegistry,
-  type ResolvedPlanTarget,
-} from "./target-registry.js";
+import { resolvePlanTargetAgainstRegistry, type ResolvedPlanTarget } from "./target-registry.js";
 
 export type SecretsPlanTargetType = string;
 
@@ -82,7 +78,7 @@ export function resolveValidatedPlanTarget(candidate: {
   accountId?: string;
   authProfileProvider?: string;
 }): ResolvedPlanTarget | null {
-  if (!isKnownSecretTargetType(candidate.type)) {
+  if (typeof candidate.type !== "string" || !candidate.type.trim()) {
     return null;
   }
   const path = typeof candidate.path === "string" ? candidate.path.trim() : "";
@@ -91,7 +87,7 @@ export function resolveValidatedPlanTarget(candidate: {
   }
   const segments =
     Array.isArray(candidate.pathSegments) && candidate.pathSegments.length > 0
-      ? candidate.pathSegments.map((segment) => String(segment).trim()).filter(Boolean)
+      ? candidate.pathSegments.map((segment) => segment.trim()).filter(Boolean)
       : parseDotPath(path);
   if (segments.length === 0 || hasForbiddenPathSegment(segments) || path !== toDotPath(segments)) {
     return null;
@@ -128,7 +124,6 @@ export function isSecretsApplyPlan(value: unknown): value is SecretsApplyPlan {
       authProfileProvider: candidate.authProfileProvider,
     });
     if (
-      !isKnownSecretTargetType(candidate.type) ||
       typeof candidate.path !== "string" ||
       !candidate.path.trim() ||
       (candidate.pathSegments !== undefined && !Array.isArray(candidate.pathSegments)) ||
