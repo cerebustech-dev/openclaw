@@ -191,7 +191,9 @@ private func makeDefaultOptions() -> GatewayConnectOptions {
 
 // MARK: - Security Test Suite
 
-@Suite("GatewayNodeSession Security Audit")
+// Several inner suites mutate the process-global OPENCLAW_STATE_DIR via setenv;
+// .serialized prevents swift-testing's default parallel runner from racing them.
+@Suite("GatewayNodeSession Security Audit", .serialized)
 struct GatewayNodeSessionSecurityTests {
 
     // MARK: - D1: TLS & Transport
