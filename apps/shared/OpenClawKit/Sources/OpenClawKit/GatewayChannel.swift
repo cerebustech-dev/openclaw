@@ -769,9 +769,8 @@ public actor GatewayChannelActor {
         }
         guard let data else { return }
         guard let frame = try? self.decoder.decode(GatewayFrame.self, from: data) else {
-            let preview = data.prefix(64)
             let typeHint = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["type"] as? String
-            self.logger.error("gateway decode failed type=\(typeHint ?? \"unknown\", privacy: .public) bytes=\(data.count, privacy: .public)")
+            self.logger.error("gateway decode failed type=\(typeHint ?? "unknown", privacy: .public) bytes=\(data.count, privacy: .public)")
             return
         }
         switch frame {
@@ -1112,16 +1111,6 @@ public actor GatewayChannelActor {
             )
             throw error
         }
-    }
-
-    private nonisolated func sanitizedURLString() -> String {
-        var components = URLComponents(url: self.url, resolvingAgainstBaseURL: false)
-        components?.user = nil
-        components?.password = nil
-        if let items = components?.queryItems {
-            components?.queryItems = items.map { URLQueryItem(name: $0.name, value: "***") }
-        }
-        return components?.string ?? self.url.host ?? "unknown"
     }
 
     private func failPending(_ error: Error) async {
