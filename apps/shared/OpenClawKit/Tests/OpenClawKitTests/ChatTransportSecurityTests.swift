@@ -7,6 +7,7 @@ import OpenClawProtocol
 // MARK: - D1: Attachment Size Validation
 
 @Suite("D1: Attachment Size Validation")
+@MainActor
 struct D1_AttachmentSize {
     @Test func maxAttachmentBytesConstantExists() {
         // V1: Named constant should exist (was magic number 5_000_000)
