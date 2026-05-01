@@ -76,7 +76,8 @@ private final class FakeGatewayWebSocketTask: WebSocketTasking, @unchecked Senda
             return current
         }
         if phase == 0 {
-            return .data(Self.connectChallengeData(nonce: "nonce-1"))
+            // Fake nonce must satisfy GatewayConnectChallengeSupport.minimumNonceLength (8).
+            return .data(Self.connectChallengeData(nonce: "fake-nonce-1234"))
         }
         for _ in 0..<50 {
             let id = self.lock.withLock { self.connectRequestId }
