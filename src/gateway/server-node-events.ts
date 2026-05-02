@@ -1,7 +1,3 @@
-// TODO(driftlane-i1a): pass-B reconciliation — fork retains createHash for the
-// APNs token fingerprint hardening; upstream's split moved OpenClawConfig and
-// updatePairedDeviceMetadata into separate imports. Both sides are kept here
-// for compile-only Pass A.
 import { createHash, randomUUID } from "node:crypto";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { updatePairedDeviceMetadata } from "../infra/device-pairing.js";

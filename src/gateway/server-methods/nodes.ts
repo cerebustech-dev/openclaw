@@ -147,6 +147,32 @@ function resolveRelayNodePushConfig(cfg: OpenClawConfig) {
     : { ok: false as const, error: relay.error };
 }
 
+// driftlane-i1a: APNs auth-resolution errors can carry filesystem paths
+// (push-apns.ts:773 includes ${keyPath}) and other config detail. Map to a
+// fixed code set before surfacing as apnsReason so the wake/alert response
+// never echoes secrets, paths, or OS errors back to the caller.
+export function sanitizeApnsAuthReason(rawError: string | undefined): string {
+  if (!rawError) {
+    return "apns-auth-other";
+  }
+  if (rawError.startsWith("APNs auth missing:")) {
+    return "apns-auth-missing-team-or-key";
+  }
+  if (rawError.startsWith("APNs private key missing:")) {
+    return "apns-auth-missing-private-key";
+  }
+  if (rawError.startsWith("failed reading OPENCLAW_APNS_PRIVATE_KEY_PATH")) {
+    return "apns-auth-key-read-failed";
+  }
+  if (rawError === "OPENCLAW_APNS_RELAY_BASE_URL missing") {
+    return "apns-relay-base-url-missing";
+  }
+  if (rawError.startsWith("OPENCLAW_APNS_RELAY_BASE_URL")) {
+    return "apns-relay-config-invalid";
+  }
+  return "apns-auth-other";
+}
+
 async function clearStaleApnsRegistrationIfNeeded(
   registration: NonNullable<Awaited<ReturnType<typeof loadApnsRegistration>>>,
   nodeId: string,
@@ -335,20 +361,19 @@ export async function maybeWakeNodeWithApns(
         return withDuration({ available: false, throttled: false, path: "no-registration" });
       }
 
-      // TODO(driftlane-i1a): pass-B reconciliation — fork iterates over all
-      // APNs registrations and keeps best result; upstream's wake path now
-      // takes opts?.cfg through resolveRelayNodePushConfig and surfaces
-      // relay.error in the no-auth path. Reconcile the iteration with
-      // upstream's cfg-aware relay resolution and richer error reporting.
       const directAuth = await resolveDirectNodePushConfig();
       const relayAuth = resolveRelayNodePushConfig(opts?.cfg ?? getRuntimeConfig());
 
       let bestResult: { ok: boolean; status: number; reason?: string } | undefined;
+      let firstAuthError: string | undefined;
       for (const registration of registrations) {
         let wakeResult;
         try {
           if (registration.transport === "relay") {
             if (!relayAuth.ok) {
+              if (!firstAuthError) {
+                firstAuthError = sanitizeApnsAuthReason(relayAuth.error);
+              }
               continue;
             }
             state.lastWakeAtMs = Date.now();
@@ -360,6 +385,9 @@ export async function maybeWakeNodeWithApns(
             });
           } else {
             if (!directAuth.ok) {
+              if (!firstAuthError) {
+                firstAuthError = sanitizeApnsAuthReason(directAuth.error);
+              }
               continue;
             }
             state.lastWakeAtMs = Date.now();
@@ -379,7 +407,12 @@ export async function maybeWakeNodeWithApns(
         }
       }
       if (!bestResult) {
-        return withDuration({ available: false, throttled: false, path: "no-auth" });
+        return withDuration({
+          available: false,
+          throttled: false,
+          path: "no-auth",
+          apnsReason: firstAuthError,
+        });
       }
       if (!bestResult.ok) {
         return withDuration({
@@ -451,17 +484,16 @@ export async function maybeSendNodeWakeNudge(
   const relayAuth = resolveRelayNodePushConfig(opts?.cfg ?? getRuntimeConfig());
 
   try {
-    // TODO(driftlane-i1a): pass-B reconciliation — fork iterates registrations
-    // and keeps best result for the alert path; upstream's alert path now
-    // takes opts?.cfg through resolveRelayNodePushConfig and surfaces
-    // relay.error in the no-auth path. Reconcile iteration with cfg-aware
-    // relay resolution and richer error reporting.
     let bestResult: { ok: boolean; status: number; reason?: string } | undefined;
+    let firstAuthError: string | undefined;
     for (const registration of registrations) {
       try {
         let result;
         if (registration.transport === "relay") {
           if (!relayAuth.ok) {
+            if (!firstAuthError) {
+              firstAuthError = sanitizeApnsAuthReason(relayAuth.error);
+            }
             continue;
           }
           result = await sendApnsAlert({
@@ -473,6 +505,9 @@ export async function maybeSendNodeWakeNudge(
           });
         } else {
           if (!directAuth.ok) {
+            if (!firstAuthError) {
+              firstAuthError = sanitizeApnsAuthReason(directAuth.error);
+            }
             continue;
           }
           result = await sendApnsAlert({
@@ -492,7 +527,12 @@ export async function maybeSendNodeWakeNudge(
       }
     }
     if (!bestResult) {
-      return withDuration({ sent: false, throttled: false, reason: "no-auth" });
+      return withDuration({
+        sent: false,
+        throttled: false,
+        reason: "no-auth",
+        apnsReason: firstAuthError,
+      });
     }
     if (!bestResult.ok) {
       return withDuration({
