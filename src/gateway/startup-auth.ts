@@ -15,12 +15,7 @@ import {
   hasGatewayTokenEnvCandidate,
   trimToUndefined,
 } from "./credentials.js";
-// TODO(driftlane-u8f): pass-B reconciliation — fork added auth-mode=none with
-// non-loopback bind refusal (uses isLoopbackHost +
-// resolveRequiredConfiguredSecretRefInputString). Verify the audit guard is
-// re-applied alongside upstream's assertGatewayAuthNotKnownWeak check.
 import { isLoopbackHost } from "./net.js";
-import { resolveRequiredConfiguredSecretRefInputString } from "./resolve-configured-secret-input-string.js";
 import { assertGatewayAuthNotKnownWeak } from "./known-weak-gateway-secrets.js";
 
 export { assertGatewayAuthNotKnownWeak } from "./known-weak-gateway-secrets.js";
