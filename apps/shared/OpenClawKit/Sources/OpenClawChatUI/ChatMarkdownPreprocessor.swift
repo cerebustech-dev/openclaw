@@ -89,6 +89,7 @@ enum ChatMarkdownPreprocessor {
         }
 
         let b64 = String(trimmed[trimmed.index(after: comma)...])
+        guard b64.count <= 10_000_000 else { return nil }
         let image = Data(base64Encoded: b64).flatMap(OpenClawPlatformImage.init(data:))
         return InlineImage(label: label, image: image)
     }
