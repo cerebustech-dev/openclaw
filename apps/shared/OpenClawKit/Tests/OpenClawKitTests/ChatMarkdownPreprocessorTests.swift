@@ -164,6 +164,15 @@ struct ChatMarkdownPreprocessorTests {
         #expect(result.cleaned == "User-visible text")
     }
 
+    @Test func rejectsOversizedBase64Payload() {
+        let oversized = String(repeating: "A", count: 10_000_001)
+        let markdown = "![bomb](data:image/png;base64,\(oversized))"
+
+        let result = ChatMarkdownPreprocessor.preprocess(markdown: markdown)
+
+        #expect(result.images.isEmpty)
+    }
+
     @Test func preservesUntrustedContextHeaderWhenItIsUserContent() {
         let markdown = """
         User-visible text

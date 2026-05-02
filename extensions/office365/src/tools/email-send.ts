@@ -1,4 +1,4 @@
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import type { GraphClient } from "../graph-client.js";
 import { toolErrorResult, toolSuccessResult, catchAsToolError } from "../types.js";
 import { validateAndMapAttachments } from "./_email-shared.js";

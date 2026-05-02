@@ -1,4 +1,4 @@
-import type { PluginLogger } from "openclaw/plugin-sdk";
+import type { PluginLogger } from "openclaw/plugin-sdk/core";
 import type { Office365Config } from "./types.js";
 import { isMultiAccountMode, listOffice365AccountIds, resolveOffice365Account } from "./accounts.js";
 import { createGraphClient, type GraphClient } from "./graph-client.js";

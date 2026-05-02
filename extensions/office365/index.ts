@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { type OpenClawPluginApi, type ProviderAuthContext } from "openclaw/plugin-sdk";
-import { buildOauthProviderAuthResult } from "openclaw/plugin-sdk/provider-auth";
+import type { OpenClawPluginApi } from "openclaw/plugin-sdk/channel-entry-contract";
+import { buildOauthProviderAuthResult, type ProviderAuthContext } from "openclaw/plugin-sdk/provider-auth";
 import { createAccountClients } from "./src/account-clients.js";
 import {
   isMultiAccountMode,

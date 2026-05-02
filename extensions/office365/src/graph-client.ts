@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { writeFileSync, readFileSync, renameSync, mkdirSync, chmodSync, unlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
-import type { PluginLogger } from "openclaw/plugin-sdk";
+import type { PluginLogger } from "openclaw/plugin-sdk/core";
 import { fetchWithSsrFGuard } from "openclaw/plugin-sdk/ssrf-runtime";
 import { ACCOUNT_ID_RE } from "./accounts.js";
 import { refreshMicrosoftTokens } from "./oauth.js";
