@@ -570,6 +570,197 @@ struct D5_LogRedactionTests {
         await channel.shutdown()
     }
 
+    // MARK: driftlane-a23 — Pass-B redaction regression guards
+    //
+    // Note on the URLComponents-nil fallback in sanitizedURLString(): we cannot
+    // construct a URL via `URL(string:)` that URLComponents will reject —
+    // `URL` is the stricter parser. The "<redacted-url>" sentinel branch is
+    // therefore proven-unreachable from outside; its presence is defensive only.
+
+    /// Asserts that none of `secrets` appear in any common error stringification
+    /// surface, and that `present` substrings are preserved. Checks more than
+    /// `localizedDescription` to catch leaks via nested errors, NSError userInfo,
+    /// and `String(reflecting:)` (debug description).
+    private func assertNoSecretLeak(
+        _ error: Error,
+        secrets: [String],
+        present: [String] = []
+    ) {
+        let nsError = error as NSError
+        let surfaces: [String] = [
+            error.localizedDescription,
+            String(describing: error),
+            String(reflecting: error),
+            String(describing: nsError.userInfo),
+        ]
+        let combined = surfaces.joined(separator: "||")
+        for s in secrets {
+            #expect(!combined.contains(s),
+                    "secret '\(s)' leaked through one of {localizedDescription, describing, reflecting, NSError.userInfo}")
+        }
+        for p in present {
+            #expect(combined.contains(p),
+                    "expected substring '\(p)' missing from error surfaces (operators must still see which gateway failed)")
+        }
+    }
+
+    /// RED-A — combined userinfo + query in a single URL.
+    @Test
+    func errorWrappingRedactsCombinedUserInfoAndQuery() async throws {
+        let session = MultiGenerationFakeSession(taskFactory: {
+            ConfigurableFakeWebSocketTask(challengeNonce: nil)
+        })
+        let channel = GatewayChannelActor(
+            url: URL(string: "wss://admin:s3cret-p4ss@gateway.example.com:7443?token=super-secret-value&apikey=another-secret")!,
+            token: nil,
+            session: WebSocketSessionBox(session: session),
+            connectOptions: defaultTestConnectOptions(includeDeviceIdentity: false))
+
+        do {
+            try await channel.connect()
+            Issue.record("Expected connect to throw")
+        } catch {
+            assertNoSecretLeak(
+                error,
+                secrets: ["admin", "s3cret-p4ss", "super-secret-value", "another-secret"],
+                present: ["gateway.example.com", "7443"])
+        }
+        await channel.shutdown()
+    }
+
+    /// RED-B — fragment-borne secret. URLComponents.fragment is not cleared by
+    /// the original sanitizer; this test fails until GREEN-B adds fragment = nil.
+    @Test
+    func errorWrappingRedactsURLFragment() async throws {
+        let session = MultiGenerationFakeSession(taskFactory: {
+            ConfigurableFakeWebSocketTask(challengeNonce: nil)
+        })
+        let channel = GatewayChannelActor(
+            url: URL(string: "wss://gateway.example.com:7443/connect#access_token=leak-me-please")!,
+            token: nil,
+            session: WebSocketSessionBox(session: session),
+            connectOptions: defaultTestConnectOptions(includeDeviceIdentity: false))
+
+        do {
+            try await channel.connect()
+            Issue.record("Expected connect to throw")
+        } catch {
+            assertNoSecretLeak(
+                error,
+                secrets: ["leak-me-please"],
+                present: ["gateway.example.com"])
+        }
+        await channel.shutdown()
+    }
+
+    /// RED-C — path preservation lock-in. Future "redact everything" PRs that
+    /// strip path segments will trip this.
+    @Test
+    func errorPreservesURLPathSegments() async throws {
+        let session = MultiGenerationFakeSession(taskFactory: {
+            ConfigurableFakeWebSocketTask(challengeNonce: nil)
+        })
+        let channel = GatewayChannelActor(
+            url: URL(string: "wss://gateway.example.com:7443/v2/connect/socket?token=abc")!,
+            token: nil,
+            session: WebSocketSessionBox(session: session),
+            connectOptions: defaultTestConnectOptions(includeDeviceIdentity: false))
+
+        do {
+            try await channel.connect()
+            Issue.record("Expected connect to throw")
+        } catch {
+            assertNoSecretLeak(
+                error,
+                secrets: ["abc"],
+                present: ["/v2/connect/socket"])
+        }
+        await channel.shutdown()
+    }
+
+    /// RED-D — vanilla URL with no creds. Guards against an over-eager refactor
+    /// that returns the "<redacted-url>" sentinel for clean URLs or wholesale
+    /// strips host/port.
+    @Test
+    func errorPreservesVanillaURLWithoutSentinel() async throws {
+        let session = MultiGenerationFakeSession(taskFactory: {
+            ConfigurableFakeWebSocketTask(challengeNonce: nil)
+        })
+        let channel = GatewayChannelActor(
+            url: URL(string: "wss://gateway.example.com:7443/")!,
+            token: nil,
+            session: WebSocketSessionBox(session: session),
+            connectOptions: defaultTestConnectOptions(includeDeviceIdentity: false))
+
+        do {
+            try await channel.connect()
+            Issue.record("Expected connect to throw")
+        } catch {
+            assertNoSecretLeak(
+                error,
+                secrets: ["<redacted-url>"],
+                present: ["gateway.example.com", "7443"])
+        }
+        await channel.shutdown()
+    }
+
+    /// RED-E — percent-encoded secrets across user/password/query/fragment.
+    /// URLComponents stores percent-encoded forms by default; this test asserts
+    /// neither raw nor encoded forms survive the redactor.
+    @Test
+    func errorRedactsPercentEncodedSecrets() async throws {
+        let session = MultiGenerationFakeSession(taskFactory: {
+            ConfigurableFakeWebSocketTask(challengeNonce: nil)
+        })
+        let urlString = "wss://admin%40corp:p%40ss%21@gateway.example.com:7443?token=secret%21%40%23&state=lookup#token=enc%2Dsecret"
+        let channel = GatewayChannelActor(
+            url: URL(string: urlString)!,
+            token: nil,
+            session: WebSocketSessionBox(session: session),
+            connectOptions: defaultTestConnectOptions(includeDeviceIdentity: false))
+
+        do {
+            try await channel.connect()
+            Issue.record("Expected connect to throw")
+        } catch {
+            assertNoSecretLeak(
+                error,
+                secrets: [
+                    // raw forms
+                    "admin@corp", "p@ss!", "secret!@#", "enc-secret", "lookup",
+                    // encoded forms (URLComponents may re-emit these)
+                    "admin%40corp", "p%40ss%21", "secret%21%40%23", "enc%2Dsecret",
+                ],
+                present: ["gateway.example.com"])
+        }
+        await channel.shutdown()
+    }
+
+    /// RED-F — arbitrary / unknown query keys + duplicate keys. Confirms the
+    /// redactor is name-agnostic (not a denylist) and dedup-safe.
+    @Test
+    func errorRedactsArbitraryAndDuplicateQueryKeys() async throws {
+        let session = MultiGenerationFakeSession(taskFactory: {
+            ConfigurableFakeWebSocketTask(challengeNonce: nil)
+        })
+        let channel = GatewayChannelActor(
+            url: URL(string: "wss://gateway.example.com:7443/?x=alpha&y=beta&y=gamma&UNKNOWN=delta")!,
+            token: nil,
+            session: WebSocketSessionBox(session: session),
+            connectOptions: defaultTestConnectOptions(includeDeviceIdentity: false))
+
+        do {
+            try await channel.connect()
+            Issue.record("Expected connect to throw")
+        } catch {
+            assertNoSecretLeak(
+                error,
+                secrets: ["alpha", "beta", "gamma", "delta"],
+                present: ["x=", "y=", "UNKNOWN="])
+        }
+        await channel.shutdown()
+    }
+
     @Test
     func disconnectClearsAllCredentialState() async throws {
         let session = MultiGenerationFakeSession()

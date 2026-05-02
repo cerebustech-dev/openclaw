@@ -21,7 +21,7 @@ vi.mock("node:crypto", async () => {
   };
 });
 
-vi.mock("openclaw/plugin-sdk", () => ({
+vi.mock("openclaw/plugin-sdk/ssrf-runtime", () => ({
   fetchWithSsrFGuard: vi.fn(),
 }));
 

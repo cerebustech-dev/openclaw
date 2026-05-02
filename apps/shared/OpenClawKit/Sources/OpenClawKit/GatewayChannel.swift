@@ -340,9 +340,6 @@ public actor GatewayChannelActor {
                 },
                 operation: { try await self.sendConnect() })
         } catch {
-            // TODO(driftlane-a23): pass-B reconciliation — fork redacts the URL
-            // via sanitizedURLString(); upstream emits absoluteString. Verify
-            // the redaction is preserved for connect-error log breadcrumbs.
             let wrapped: Error = if let authError = error as? GatewayConnectAuthError {
                 authError
             } else {
@@ -964,6 +961,7 @@ public actor GatewayChannelActor {
         }
         components.user = nil
         components.password = nil
+        components.fragment = nil
         return components.string ?? "<redacted-url>"
     }
 
