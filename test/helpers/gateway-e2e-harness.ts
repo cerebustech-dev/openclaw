@@ -196,7 +196,14 @@ async function removeGatewayHome(homeDir: string) {
   });
 }
 
-export async function spawnGatewayInstance(name: string): Promise<GatewayInstance> {
+export type SpawnGatewayInstanceOptions = {
+  controlUi?: boolean;
+};
+
+export async function spawnGatewayInstance(
+  name: string,
+  options?: SpawnGatewayInstanceOptions,
+): Promise<GatewayInstance> {
   const port = await getFreePort();
   const hookToken = `token-${name}-${randomUUID()}`;
   const gatewayToken = `gateway-${name}-${randomUUID()}`;
@@ -209,7 +216,7 @@ export async function spawnGatewayInstance(name: string): Promise<GatewayInstanc
     gateway: {
       port,
       auth: { mode: "token", token: gatewayToken },
-      controlUi: { enabled: false },
+      controlUi: { enabled: options?.controlUi === true },
     },
     hooks: { enabled: true, token: hookToken, path: "/hooks" },
   };
