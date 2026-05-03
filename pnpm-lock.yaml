@@ -1033,7 +1033,11 @@ importers:
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
 
-  extensions/office365: {}
+  extensions/office365:
+    dependencies:
+      typebox:
+        specifier: 1.1.33
+        version: 1.1.33
 
   extensions/ollama:
     dependencies:
