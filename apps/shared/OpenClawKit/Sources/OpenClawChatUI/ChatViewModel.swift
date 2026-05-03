@@ -1,6 +1,6 @@
-import OpenClawKit
 import Foundation
 import Observation
+import OpenClawKit
 import OSLog
 import UniformTypeIdentifiers
 
@@ -14,8 +14,10 @@ private let chatUILogger = Logger(subsystem: "ai.openclaw", category: "OpenClawC
 
 @MainActor
 @Observable
+// swiftlint:disable:next type_body_length
 public final class OpenClawChatViewModel {
     public static let defaultModelSelectionID = "__default__"
+    public static let maxAttachmentBytes = 5_000_000
 
     public private(set) var messages: [OpenClawChatMessage] = []
     public var input: String = ""
@@ -217,6 +219,7 @@ public final class OpenClawChatViewModel {
     // MARK: - Internals
 
     private func bootstrap() async {
+        guard !self.isLoading else { return }
         self.isLoading = true
         self.errorText = nil
         self.healthOK = false
@@ -517,6 +520,15 @@ public final class OpenClawChatViewModel {
                 name: nil,
                 arguments: nil),
         ]
+        // Safety-net: reject oversized attachments at send time (defense-in-depth).
+        for att in self.attachments {
+            guard att.data.count <= Self.maxAttachmentBytes else {
+                self.errorText = "Attachment \(att.fileName) exceeds size limit"
+                self.isSending = false
+                return
+            }
+        }
+
         let encodedAttachments = self.attachments.map { att -> OpenClawChatAttachmentPayload in
             OpenClawChatAttachmentPayload(
                 type: att.type,
@@ -659,8 +671,8 @@ public final class OpenClawChatViewModel {
             self.errorText = "Unable to compact the session. Please try again."
             let nsError = error as NSError
             chatUILogger.error(
-                "session compact failed domain=\(nsError.domain, privacy: .public) code=\(nsError.code, privacy: .public) details=\(String(describing: error), privacy: .private)"
-            )
+                "compact failed domain=\(nsError.domain, privacy: .public) code=\(nsError.code, privacy: .public)")
+            chatUILogger.error("compact details=\(String(describing: error), privacy: .private)")
             return
         }
 
@@ -733,7 +745,10 @@ public final class OpenClawChatViewModel {
                 self.latestModelSelectionRequestIDsBySession.removeValue(forKey: sessionKey)
             }
             if self.lastSuccessfulModelSelectionIDsBySession[sessionKey] == previous {
-                self.applySuccessfulModelSelection(previous, sessionKey: sessionKey, syncSelection: sessionKey == self.sessionKey)
+                self.applySuccessfulModelSelection(
+                    previous,
+                    sessionKey: sessionKey,
+                    syncSelection: sessionKey == self.sessionKey)
             }
             guard sessionKey == self.sessionKey else { return }
             self.modelSelectionID = previous
@@ -856,7 +871,8 @@ public final class OpenClawChatViewModel {
             syncSelection: syncSelection)
     }
 
-    private func resolvedSessionModelIdentity(forSelectionID selectionID: String) -> (modelID: String?, modelProvider: String?) {
+    private func resolvedSessionModelIdentity(forSelectionID selectionID: String)
+    -> (modelID: String?, modelProvider: String?) {
         guard let modelRef = self.modelRef(forSelectionID: selectionID) else {
             return (nil, nil)
         }
@@ -1001,6 +1017,13 @@ public final class OpenClawChatViewModel {
         }
     }
 
+    // Test support: expose matchesCurrentSessionKey for security audit verification.
+    #if DEBUG
+    static func testMatchesCurrentSessionKey(incoming: String, current: String) -> Bool {
+        matchesCurrentSessionKey(incoming: incoming, current: current)
+    }
+    #endif
+
     private static func matchesCurrentSessionKey(incoming: String, current: String) -> Bool {
         let incomingNormalized = incoming.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let currentNormalized = current.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -1129,7 +1152,7 @@ public final class OpenClawChatViewModel {
     }
 
     private func addImageAttachment(url: URL?, data: Data, fileName: String, mimeType: String) async {
-        if data.count > 5_000_000 {
+        if data.count > Self.maxAttachmentBytes {
             self.errorText = "Attachment \(fileName) exceeds 5 MB limit"
             return
         }

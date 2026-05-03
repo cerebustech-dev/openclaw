@@ -21,7 +21,7 @@ vi.mock("node:crypto", async () => {
   };
 });
 
-vi.mock("openclaw/plugin-sdk", () => ({
+vi.mock("openclaw/plugin-sdk/ssrf-runtime", () => ({
   fetchWithSsrFGuard: vi.fn(),
 }));
 
@@ -170,7 +170,7 @@ describe("readCredentialFile validates types (Issue 14)", () => {
       JSON.stringify({ access: 12345, refresh: "refresh", expires: Date.now() + 3600_000 }),
     );
 
-    const { fetchWithSsrFGuard } = await import("openclaw/plugin-sdk");
+    const { fetchWithSsrFGuard } = await import("openclaw/plugin-sdk/ssrf-runtime");
     (fetchWithSsrFGuard as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("should not reach fetch"));
 
     const client = createGraphClient({
@@ -188,7 +188,7 @@ describe("readCredentialFile validates types (Issue 14)", () => {
       JSON.stringify({ access: "access", refresh: null, expires: Date.now() + 3600_000 }),
     );
 
-    const { fetchWithSsrFGuard } = await import("openclaw/plugin-sdk");
+    const { fetchWithSsrFGuard } = await import("openclaw/plugin-sdk/ssrf-runtime");
     (fetchWithSsrFGuard as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("should not reach fetch"));
 
     const client = createGraphClient({
@@ -205,7 +205,7 @@ describe("readCredentialFile validates types (Issue 14)", () => {
       JSON.stringify({ access: "access", refresh: "refresh", expires: "not-a-number" }),
     );
 
-    const { fetchWithSsrFGuard } = await import("openclaw/plugin-sdk");
+    const { fetchWithSsrFGuard } = await import("openclaw/plugin-sdk/ssrf-runtime");
     (fetchWithSsrFGuard as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("should not reach fetch"));
 
     const client = createGraphClient({
@@ -222,7 +222,7 @@ describe("readCredentialFile validates types (Issue 14)", () => {
       JSON.stringify({ access: "access", refresh: "refresh", expires: -1 }),
     );
 
-    const { fetchWithSsrFGuard } = await import("openclaw/plugin-sdk");
+    const { fetchWithSsrFGuard } = await import("openclaw/plugin-sdk/ssrf-runtime");
     (fetchWithSsrFGuard as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("should not reach fetch"));
 
     const client = createGraphClient({
@@ -326,7 +326,7 @@ describe("credentialPath with accountId", () => {
   it("reads from account-specific credential file", async () => {
     fsMock.readFileSync.mockReturnValue(JSON.stringify(TEST_CRED));
 
-    const { fetchWithSsrFGuard } = await import("openclaw/plugin-sdk");
+    const { fetchWithSsrFGuard } = await import("openclaw/plugin-sdk/ssrf-runtime");
     (fetchWithSsrFGuard as ReturnType<typeof vi.fn>).mockResolvedValue({
       response: new Response(JSON.stringify({ id: "123" }), { status: 200 }),
       release: vi.fn(),

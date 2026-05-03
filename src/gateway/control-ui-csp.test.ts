@@ -2,6 +2,16 @@ import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { buildControlUiCspHeader, computeInlineScriptHashes } from "./control-ui-csp.js";
 
+function parseCsp(csp: string): { directive: string; values: string[] }[] {
+  return csp
+    .split(";")
+    .map((seg) => {
+      const [directive, ...values] = seg.trim().split(/\s+/);
+      return { directive: directive ?? "", values };
+    })
+    .filter((d) => d.directive);
+}
+
 describe("buildControlUiCspHeader", () => {
   it("blocks inline scripts while allowing inline styles", () => {
     const csp = buildControlUiCspHeader();
@@ -15,6 +25,12 @@ describe("buildControlUiCspHeader", () => {
     const csp = buildControlUiCspHeader();
     expect(csp).toContain("https://fonts.googleapis.com");
     expect(csp).toContain("font-src 'self' https://fonts.gstatic.com");
+  });
+
+  it("limits image loading to same-origin, data, and managed blob URLs", () => {
+    const csp = buildControlUiCspHeader();
+    expect(csp).toContain("img-src 'self' data: blob:");
+    expect(csp).not.toContain("img-src 'self' data: blob: https:");
   });
 
   it("includes inline script hashes in script-src when provided", () => {
@@ -36,7 +52,6 @@ describe("buildControlUiCspHeader", () => {
     const csp = buildControlUiCspHeader({ inlineScriptHashes: [] });
     expect(csp).toMatch(/script-src 'self'(?:;|$)/);
   });
-  });
 
   it("includes connect-src 'self' without ws:/wss: scheme wildcards", () => {
     const csp = buildControlUiCspHeader();
@@ -48,6 +63,21 @@ describe("buildControlUiCspHeader", () => {
     expect(connectSrc).toBeDefined();
     expect(connectSrc).not.toContain("ws:");
     expect(connectSrc).not.toContain("wss:");
+  });
+
+  it("includes exactly one worker-src 'self' for the PWA ServiceWorker", () => {
+    const csp = buildControlUiCspHeader();
+    const workerSrcs = parseCsp(csp).filter((d) => d.directive === "worker-src");
+    expect(workerSrcs).toHaveLength(1);
+    expect(workerSrcs[0]?.values).toEqual(["'self'"]);
+  });
+
+  it("includes exactly one connect-src 'self' (no duplicate / wildcard)", () => {
+    const csp = buildControlUiCspHeader();
+    const connectSrcs = parseCsp(csp).filter((d) => d.directive === "connect-src");
+    expect(connectSrcs).toHaveLength(1);
+    expect(connectSrcs[0]?.values).toEqual(["'self'"]);
+  });
 });
 
 describe("computeInlineScriptHashes", () => {
@@ -97,5 +127,6 @@ describe("computeInlineScriptHashes", () => {
   });
 
   it("skips empty inline scripts", () => {
-    expect(computeInlineScriptHashes("<script></script>")).toEqual([]);  });
+    expect(computeInlineScriptHashes("<script></script>")).toEqual([]);
+  });
 });

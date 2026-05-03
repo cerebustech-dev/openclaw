@@ -1,60 +1,37 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import type { OpenClawConfig } from "../config/config.js";
-import { collectEnabledInsecureOrDangerousFlags } from "./dangerous-config-flags.js";
-
-const { loadPluginManifestRegistryMock } = vi.hoisted(() => ({
-  loadPluginManifestRegistryMock: vi.fn(),
-}));
-
-vi.mock("../plugins/manifest-registry.js", () => ({
-  loadPluginManifestRegistry: loadPluginManifestRegistryMock,
-}));
+import { collectEnabledInsecureOrDangerousFlagsFromContracts } from "./dangerous-config-flags-core.js";
 
 function asConfig(value: unknown): OpenClawConfig {
   return value as OpenClawConfig;
 }
 
 describe("collectEnabledInsecureOrDangerousFlags", () => {
-  beforeEach(() => {
-    loadPluginManifestRegistryMock.mockReset();
+  it("flags gateway.auth.mode=none as dangerous", () => {
+    expect(
+      collectEnabledInsecureOrDangerousFlagsFromContracts(
+        asConfig({ gateway: { auth: { mode: "none" } } }),
+      ),
+    ).toContain("gateway.auth.mode=none");
   });
 
-  it("flags auth.mode=none as dangerous", () => {
-    loadPluginManifestRegistryMock.mockReturnValue({ plugins: [], diagnostics: [] });
-    const cfg = { gateway: { auth: { mode: "none" } } } as OpenClawConfig;
-    const flags = collectEnabledInsecureOrDangerousFlags(cfg);
-    expect(flags).toContain("gateway.auth.mode=none");
+  it("does not flag gateway.auth.mode=token", () => {
+    expect(
+      collectEnabledInsecureOrDangerousFlagsFromContracts(
+        asConfig({ gateway: { auth: { mode: "token" } } }),
+      ),
+    ).not.toContain("gateway.auth.mode=none");
   });
 
-  it("does not flag auth.mode=token", () => {
-    loadPluginManifestRegistryMock.mockReturnValue({ plugins: [], diagnostics: [] });
-    const cfg = { gateway: { auth: { mode: "token" } } } as OpenClawConfig;
-    const flags = collectEnabledInsecureOrDangerousFlags(cfg);
-    expect(flags).not.toContain("gateway.auth.mode=none");
-  });
-
-  it("does not flag when auth config is absent", () => {
-    loadPluginManifestRegistryMock.mockReturnValue({ plugins: [], diagnostics: [] });
-    const cfg = {} as OpenClawConfig;
-    const flags = collectEnabledInsecureOrDangerousFlags(cfg);
-    expect(flags).not.toContain("gateway.auth.mode=none");
+  it("does not flag when gateway.auth config is absent", () => {
+    expect(collectEnabledInsecureOrDangerousFlagsFromContracts(asConfig({}))).not.toContain(
+      "gateway.auth.mode=none",
+    );
   });
 
   it("collects manifest-declared dangerous plugin config values", () => {
-    loadPluginManifestRegistryMock.mockReturnValue({
-      plugins: [
-        {
-          id: "acpx",
-          configContracts: {
-            dangerousFlags: [{ path: "permissionMode", equals: "approve-all" }],
-          },
-        },
-      ],
-      diagnostics: [],
-    });
-
     expect(
-      collectEnabledInsecureOrDangerousFlags(
+      collectEnabledInsecureOrDangerousFlagsFromContracts(
         asConfig({
           plugins: {
             entries: {
@@ -66,25 +43,25 @@ describe("collectEnabledInsecureOrDangerousFlags", () => {
             },
           },
         }),
+        {
+          configContractsById: new Map([
+            [
+              "acpx",
+              {
+                configContracts: {
+                  dangerousFlags: [{ path: "permissionMode", equals: "approve-all" }],
+                },
+              },
+            ],
+          ]),
+        },
       ),
     ).toContain("plugins.entries.acpx.config.permissionMode=approve-all");
   });
 
   it("ignores plugin config values that are not declared as dangerous", () => {
-    loadPluginManifestRegistryMock.mockReturnValue({
-      plugins: [
-        {
-          id: "other",
-          configContracts: {
-            dangerousFlags: [{ path: "mode", equals: "danger" }],
-          },
-        },
-      ],
-      diagnostics: [],
-    });
-
     expect(
-      collectEnabledInsecureOrDangerousFlags(
+      collectEnabledInsecureOrDangerousFlagsFromContracts(
         asConfig({
           plugins: {
             entries: {
@@ -96,7 +73,120 @@ describe("collectEnabledInsecureOrDangerousFlags", () => {
             },
           },
         }),
+        {
+          configContractsById: new Map([
+            [
+              "other",
+              {
+                configContracts: {
+                  dangerousFlags: [{ path: "mode", equals: "danger" }],
+                },
+              },
+            ],
+          ]),
+        },
       ),
     ).toEqual([]);
+  });
+
+  it("collects dangerous sandbox, hook, browser, and fs flags", () => {
+    expect(
+      collectEnabledInsecureOrDangerousFlagsFromContracts(
+        asConfig({
+          agents: {
+            defaults: {
+              sandbox: {
+                docker: {
+                  dangerouslyAllowReservedContainerTargets: true,
+                  dangerouslyAllowContainerNamespaceJoin: true,
+                },
+              },
+            },
+            list: [
+              {
+                id: "worker",
+                sandbox: {
+                  docker: {
+                    dangerouslyAllowExternalBindSources: true,
+                  },
+                },
+              },
+            ],
+          },
+          hooks: {
+            allowRequestSessionKey: true,
+          },
+          browser: {
+            ssrfPolicy: {
+              dangerouslyAllowPrivateNetwork: true,
+            },
+          },
+          tools: {
+            fs: {
+              workspaceOnly: false,
+            },
+          },
+        }),
+      ),
+    ).toEqual(
+      expect.arrayContaining([
+        "agents.defaults.sandbox.docker.dangerouslyAllowReservedContainerTargets=true",
+        "agents.defaults.sandbox.docker.dangerouslyAllowContainerNamespaceJoin=true",
+        'agents.list[id="worker"].sandbox.docker.dangerouslyAllowExternalBindSources=true',
+        "hooks.allowRequestSessionKey=true",
+        "browser.ssrfPolicy.dangerouslyAllowPrivateNetwork=true",
+        "tools.fs.workspaceOnly=false",
+      ]),
+    );
+  });
+
+  it("uses stable agent ids for per-agent dangerous sandbox flags", () => {
+    expect(
+      collectEnabledInsecureOrDangerousFlagsFromContracts(
+        asConfig({
+          agents: {
+            list: [
+              {
+                id: "worker",
+                sandbox: {
+                  docker: {
+                    dangerouslyAllowContainerNamespaceJoin: true,
+                  },
+                },
+              },
+              {
+                id: "helper",
+              },
+            ],
+          },
+        }),
+      ),
+    ).toContain(
+      'agents.list[id="worker"].sandbox.docker.dangerouslyAllowContainerNamespaceJoin=true',
+    );
+
+    expect(
+      collectEnabledInsecureOrDangerousFlagsFromContracts(
+        asConfig({
+          agents: {
+            list: [
+              {
+                id: "helper",
+              },
+              {
+                id: "worker",
+                sandbox: {
+                  docker: {
+                    dangerouslyAllowContainerNamespaceJoin: true,
+                  },
+                },
+              },
+            ],
+          },
+        }),
+      ),
+    ).toContain(
+      'agents.list[id="worker"].sandbox.docker.dangerouslyAllowContainerNamespaceJoin=true',
+    );
   });
 });

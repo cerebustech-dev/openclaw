@@ -19,8 +19,11 @@ vi.mock("node:crypto", async () => {
   };
 });
 
-vi.mock("openclaw/plugin-sdk", () => ({
+vi.mock("openclaw/plugin-sdk/ssrf-runtime", () => ({
   fetchWithSsrFGuard: vi.fn(),
+}));
+
+vi.mock("openclaw/plugin-sdk/provider-auth", () => ({
   buildOauthProviderAuthResult: vi.fn().mockReturnValue({ providerId: "test" }),
 }));
 

@@ -1,6 +1,6 @@
 import { compileSafeRegex, MAX_GLOB_PATTERN_LENGTH } from "../security/safe-regex.js";
+import type { ConfigUiHint, ConfigUiHints } from "../shared/config-ui-hints-types.js";
 import { normalizeLowercaseStringOrEmpty } from "../shared/string-coerce.js";
-import type { ConfigUiHint, ConfigUiHints } from "./schema.hints.js";
 
 export const CONFIG_TAGS = [
   "security",
@@ -44,6 +44,8 @@ const TAG_OVERRIDES: Record<string, ConfigTag[]> = {
   "gateway.auth.token": ["security", "auth", "access", "network"],
   "gateway.auth.password": ["security", "auth", "access", "network"],
   "gateway.push.apns.relay.baseUrl": ["network", "advanced"],
+  "gateway.controlUi.embedSandbox": ["security", "access", "advanced"],
+  "gateway.controlUi.allowExternalEmbedUrls": ["security", "access", "network", "advanced"],
   "gateway.controlUi.dangerouslyAllowHostHeaderOriginFallback": [
     "security",
     "access",
@@ -52,6 +54,7 @@ const TAG_OVERRIDES: Record<string, ConfigTag[]> = {
   ],
   "gateway.controlUi.dangerouslyDisableDeviceAuth": ["security", "access", "network", "advanced"],
   "gateway.controlUi.allowInsecureAuth": ["security", "access", "network", "advanced"],
+  "gateway.nodes.pairing.autoApproveCidrs": ["security", "access", "network", "advanced"],
   "tools.exec.applyPatch.workspaceOnly": ["tools", "security", "access", "advanced"],
 };
 

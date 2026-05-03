@@ -2,16 +2,20 @@ import Foundation
 import OpenClawProtocol
 
 public enum GatewayConnectChallengeSupport {
+    /// Minimum nonce length for connect challenge. Nonces shorter than this
+    /// are rejected to prevent trivially guessable challenge-response values.
+    public static let minimumNonceLength = 8
+
     public static func nonce(from payload: [String: OpenClawProtocol.AnyCodable]?) -> String? {
         guard let nonce = payload?["nonce"]?.value as? String else { return nil }
         let trimmed = nonce.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
+        guard trimmed.count >= Self.minimumNonceLength else { return nil }
         return trimmed
     }
 
-    public static func waitForNonce<E: Error>(
+    public static func waitForNonce(
         timeoutSeconds: Double,
-        onTimeout: @escaping @Sendable () -> E,
+        onTimeout: @escaping @Sendable () -> some Error,
         receiveNonce: @escaping @Sendable () async throws -> String?) async throws -> String
     {
         try await AsyncTimeout.withTimeout(

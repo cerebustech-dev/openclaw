@@ -1,10 +1,7 @@
 import crypto from "node:crypto";
-import type {
-  GatewayAuthConfig,
-  GatewayTailscaleConfig,
-  OpenClawConfig,
-} from "../config/config.js";
-import { replaceConfigFile } from "../config/config.js";
+import { replaceConfigFile } from "../config/mutate.js";
+import type { GatewayAuthConfig, GatewayTailscaleConfig } from "../config/types.gateway.js";
+import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { normalizeOptionalString } from "../shared/string-coerce.js";
 import {
   hasConfiguredGatewayAuthSecretInput,
@@ -19,7 +16,9 @@ import {
   trimToUndefined,
 } from "./credentials.js";
 import { isLoopbackHost } from "./net.js";
-import { resolveRequiredConfiguredSecretRefInputString } from "./resolve-configured-secret-input-string.js";
+import { assertGatewayAuthNotKnownWeak } from "./known-weak-gateway-secrets.js";
+
+export { assertGatewayAuthNotKnownWeak } from "./known-weak-gateway-secrets.js";
 
 export function mergeGatewayAuthConfig(
   base?: GatewayAuthConfig,
@@ -121,8 +120,8 @@ function hasGatewayTokenCandidate(params: {
 }
 
 function hasGatewayTokenOverrideCandidate(params: { authOverride?: GatewayAuthConfig }): boolean {
-  return Boolean(
-    typeof params.authOverride?.token === "string" && params.authOverride.token.trim().length > 0,
+  return (
+    typeof params.authOverride?.token === "string" && params.authOverride.token.trim().length > 0
   );
 }
 
@@ -133,9 +132,9 @@ function hasGatewayPasswordOverrideCandidate(params: {
   if (hasGatewayPasswordEnvCandidate(params.env)) {
     return true;
   }
-  return Boolean(
+  return (
     typeof params.authOverride?.password === "string" &&
-    params.authOverride.password.trim().length > 0,
+    params.authOverride.password.trim().length > 0
   );
 }
 
@@ -198,6 +197,7 @@ export async function ensureGatewayStartupAuth(params: {
     tailscaleOverride: params.tailscaleOverride,
   });
   if (resolved.mode !== "token" || (resolved.token?.trim().length ?? 0) > 0) {
+    assertGatewayAuthNotKnownWeak(resolved);
     assertHooksTokenSeparateFromGatewayAuth({ cfg: params.cfg, auth: resolved });
     return { cfg: params.cfg, auth: resolved, persistedGeneratedToken: false };
   }
@@ -231,6 +231,11 @@ export async function ensureGatewayStartupAuth(params: {
     authOverride: params.authOverride,
     tailscaleOverride: params.tailscaleOverride,
   });
+  // The generated token is crypto-random, so this cannot match the weak set
+  // in practice — but running the assertion on both branches documents that
+  // the rule applies uniformly and guards against any future path that might
+  // feed a non-generated value through nextAuth.
+  assertGatewayAuthNotKnownWeak(nextAuth);
   assertHooksTokenSeparateFromGatewayAuth({ cfg: nextCfg, auth: nextAuth });
   return {
     cfg: nextCfg,

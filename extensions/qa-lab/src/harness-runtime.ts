@@ -1,3 +1,4 @@
+import { resolveInboundMentionDecision } from "openclaw/plugin-sdk/channel-inbound";
 import type { PluginRuntime } from "openclaw/plugin-sdk/runtime-store";
 
 type SessionRecord = {
@@ -44,8 +45,32 @@ export function createQaRunnerRuntime(): PluginRuntime {
         }) {
           sessions.set(sessionKey, {
             sessionKey,
-            body: String(ctx.BodyForAgent ?? ctx.Body ?? ""),
+            body: ctx.BodyForAgent ?? ctx.Body ?? "",
           });
+        },
+      },
+      text: {
+        hasControlCommand() {
+          return false;
+        },
+      },
+      mentions: {
+        buildMentionRegexes() {
+          return [/\b@?openclaw\b/i];
+        },
+        matchesMentionPatterns(text: string, regexes: RegExp[]) {
+          return regexes.some((regex) => regex.test(text));
+        },
+        resolveInboundMentionDecision,
+      },
+      groups: {
+        resolveRequireMention() {
+          return false;
+        },
+      },
+      commands: {
+        shouldHandleTextCommands() {
+          return true;
         },
       },
       reply: {
@@ -66,7 +91,7 @@ export function createQaRunnerRuntime(): PluginRuntime {
           dispatcherOptions: { deliver: (payload: { text: string }) => Promise<void> };
         }) {
           await dispatcherOptions.deliver({
-            text: `qa-echo: ${String(ctx.BodyForAgent ?? ctx.Body ?? "")}`,
+            text: `qa-echo: ${ctx.BodyForAgent ?? ctx.Body ?? ""}`,
           });
         },
       },

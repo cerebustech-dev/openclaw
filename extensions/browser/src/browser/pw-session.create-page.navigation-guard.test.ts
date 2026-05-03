@@ -1,22 +1,27 @@
-import { chromium } from "playwright-core";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { SsrFBlockedError } from "../infra/net/ssrf.js";
-import * as chromeModule from "./chrome.js";
+import "../test-support/browser-security.mock.js";
 import { BrowserTabNotFoundError } from "./errors.js";
 import { InvalidBrowserNavigationUrlError } from "./navigation-guard.js";
 import * as navigationGuardModule from "./navigation-guard.js";
-import {
-  BlockedBrowserTargetError,
-  closePlaywrightBrowserConnection,
-  createPageViaPlaywright,
-  forceDisconnectPlaywrightForTarget,
-  getPageForTargetId,
-  gotoPageWithNavigationGuard,
-  listPagesViaPlaywright,
-} from "./pw-session.js";
+import { connectOverCdpMock, getChromeWebSocketUrlMock } from "./pw-session.mock-setup.js";
 
-const connectOverCdpSpy = vi.spyOn(chromium, "connectOverCDP");
-const getChromeWebSocketUrlSpy = vi.spyOn(chromeModule, "getChromeWebSocketUrl");
+let BlockedBrowserTargetError: typeof import("./pw-session.js").BlockedBrowserTargetError;
+let closePlaywrightBrowserConnection: typeof import("./pw-session.js").closePlaywrightBrowserConnection;
+let createPageViaPlaywright: typeof import("./pw-session.js").createPageViaPlaywright;
+let forceDisconnectPlaywrightForTarget: typeof import("./pw-session.js").forceDisconnectPlaywrightForTarget;
+let getPageForTargetId: typeof import("./pw-session.js").getPageForTargetId;
+let gotoPageWithNavigationGuard: typeof import("./pw-session.js").gotoPageWithNavigationGuard;
+let listPagesViaPlaywright: typeof import("./pw-session.js").listPagesViaPlaywright;
+
+const PROXY_ENV_KEYS = [
+  "ALL_PROXY",
+  "all_proxy",
+  "HTTP_PROXY",
+  "http_proxy",
+  "HTTPS_PROXY",
+  "https_proxy",
+] as const;
 
 type MockRoute = { continue: () => Promise<void>; abort: () => Promise<void> };
 type MockRequest = {
@@ -91,8 +96,8 @@ function installBrowserMocks() {
     close: browserClose,
   } as unknown as import("playwright-core").Browser;
 
-  connectOverCdpSpy.mockResolvedValue(browser);
-  getChromeWebSocketUrlSpy.mockResolvedValue(null);
+  connectOverCdpMock.mockResolvedValue(browser);
+  getChromeWebSocketUrlMock.mockResolvedValue(null);
 
   const getBrowserDisconnectedHandler = () =>
     browserOn.mock.calls.find((call) => call[0] === "disconnected")?.[1] as
@@ -126,6 +131,7 @@ async function dispatchMockNavigation(params: {
   getRouteHandler: () => MockRouteHandler | null;
   mainFrame: object;
   url: string;
+  frame?: object;
   isNavigationRequest?: boolean;
   resourceType?: string;
   route?: Partial<MockRoute>;
@@ -137,7 +143,7 @@ async function dispatchMockNavigation(params: {
   const { resourceType } = params;
   await handler(createMockRoute(params.route), {
     isNavigationRequest: () => params.isNavigationRequest ?? true,
-    frame: () => params.mainFrame,
+    frame: () => params.frame ?? params.mainFrame,
     ...(resourceType ? { resourceType: () => resourceType } : {}),
     url: () => params.url,
   });
@@ -169,9 +175,28 @@ function mockBlockedRedirectNavigation(params: {
   });
 }
 
+beforeEach(() => {
+  for (const key of PROXY_ENV_KEYS) {
+    vi.stubEnv(key, "");
+  }
+});
+
+beforeAll(async () => {
+  ({
+    BlockedBrowserTargetError,
+    closePlaywrightBrowserConnection,
+    createPageViaPlaywright,
+    forceDisconnectPlaywrightForTarget,
+    getPageForTargetId,
+    gotoPageWithNavigationGuard,
+    listPagesViaPlaywright,
+  } = await import("./pw-session.js"));
+});
+
 afterEach(async () => {
-  connectOverCdpSpy.mockClear();
-  getChromeWebSocketUrlSpy.mockClear();
+  vi.unstubAllEnvs();
+  connectOverCdpMock.mockClear();
+  getChromeWebSocketUrlMock.mockClear();
   await closePlaywrightBrowserConnection().catch(() => {});
 });
 
@@ -198,6 +223,20 @@ describe("pw-session createPageViaPlaywright navigation guard", () => {
     });
 
     expect(created.targetId).toBe("TARGET_1");
+    expect(pageGoto).not.toHaveBeenCalled();
+  });
+
+  it("blocks hostname navigation when strict SSRF policy is configured", async () => {
+    const { pageGoto } = installBrowserMocks();
+
+    await expect(
+      createPageViaPlaywright({
+        cdpUrl: "http://127.0.0.1:18792",
+        url: "https://example.com",
+        ssrfPolicy: { dangerouslyAllowPrivateNetwork: false, allowedHostnames: ["127.0.0.1"] },
+      }),
+    ).rejects.toBeInstanceOf(InvalidBrowserNavigationUrlError);
+
     expect(pageGoto).not.toHaveBeenCalled();
   });
 
@@ -237,6 +276,41 @@ describe("pw-session createPageViaPlaywright navigation guard", () => {
     expect(pageClose).toHaveBeenCalledTimes(1);
   });
 
+  it("aborts private subframe document hops without quarantining the page", async () => {
+    const { pageGoto, pageClose, getRouteHandler, mainFrame } = installBrowserMocks();
+    const subframe = {};
+    const subframeRoute = createMockRoute();
+    pageGoto.mockImplementationOnce(async () => {
+      await dispatchMockNavigation({
+        getRouteHandler,
+        mainFrame,
+        url: "https://93.184.216.34/start",
+      });
+      await dispatchMockNavigation({
+        getRouteHandler,
+        mainFrame,
+        frame: subframe,
+        url: "http://127.0.0.1:18080/internal-hop",
+        route: subframeRoute,
+      });
+      return {
+        request: () => ({
+          url: () => "https://93.184.216.34/start",
+          redirectedFrom: () => null,
+        }),
+      };
+    });
+
+    const created = await createPageViaPlaywright({
+      cdpUrl: "http://127.0.0.1:18792",
+      url: "https://93.184.216.34/start",
+    });
+
+    expect(created.targetId).toBe("TARGET_1");
+    expect(subframeRoute.abort).toHaveBeenCalledTimes(1);
+    expect(pageClose).not.toHaveBeenCalled();
+  });
+
   it("preserves the created tab on ordinary navigation failure", async () => {
     const { pageGoto, pageClose } = installBrowserMocks();
     pageGoto.mockRejectedValueOnce(new Error("page.goto: net::ERR_NAME_NOT_RESOLVED"));
@@ -274,6 +348,34 @@ describe("pw-session createPageViaPlaywright navigation guard", () => {
     });
 
     expect(created.targetId).toBe("TARGET_1");
+    expect(pageGoto).toHaveBeenCalledTimes(1);
+    expect(pageClose).not.toHaveBeenCalled();
+  });
+
+  it("ignores already-handled route races during guarded navigation", async () => {
+    const { pageGoto, pageClose, getRouteHandler, mainFrame } = installBrowserMocks();
+    const route = createMockRoute({
+      continue: vi.fn(async () => {
+        throw new Error("Route is already handled");
+      }),
+    });
+    pageGoto.mockImplementationOnce(async () => {
+      await dispatchMockNavigation({
+        getRouteHandler,
+        mainFrame,
+        url: "https://example.com",
+        route,
+      });
+      return null;
+    });
+
+    const created = await createPageViaPlaywright({
+      cdpUrl: "http://127.0.0.1:18792",
+      url: "https://example.com",
+    });
+
+    expect(created.targetId).toBe("TARGET_1");
+    expect(route.continue).toHaveBeenCalledTimes(1);
     expect(pageGoto).toHaveBeenCalledTimes(1);
     expect(pageClose).not.toHaveBeenCalled();
   });
