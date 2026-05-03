@@ -2,7 +2,7 @@ name: Hardened Build
 
 on:
   push:
-    branches: [security/audit-remediation]
+    branches: [main]
     paths-ignore:
       - "docs/**"
       - "**/*.md"
@@ -48,6 +48,7 @@ jobs:
           tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:hardened
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:hardened-${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:v2026.4.27-cerebustech.1
           labels: |
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.source=https://github.com/cerebustech-dev/openclaw
@@ -73,6 +74,7 @@ jobs:
           tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:hardened
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:hardened-${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:v2026.4.27-cerebustech.1
           labels: |
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.source=https://github.com/cerebustech-dev/openclaw
