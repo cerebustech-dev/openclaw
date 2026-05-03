@@ -4,6 +4,9 @@
   "private": true,
   "description": "Microsoft 365 email and calendar via Graph API",
   "type": "module",
+  "dependencies": {
+    "typebox": "1.1.33"
+  },
   "openclaw": {
     "extensions": [
       "./index.ts"
