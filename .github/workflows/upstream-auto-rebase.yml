@@ -20,7 +20,7 @@ jobs:
       - name: Checkout fork
         uses: actions/checkout@v4
         with:
-          ref: security/audit-remediation
+          ref: main
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -43,12 +43,12 @@ jobs:
           fi
 
           # Detect current base from commit history
-          CURRENT_BASE=$(git log --oneline security/audit-remediation | grep "^[a-f0-9]* build: cut" | head -1 | sed 's/.*cut \(.*\) stable.*/\1/' || echo "unknown")
+          CURRENT_BASE=$(git log --oneline main | grep "^[a-f0-9]* build: cut" | head -1 | sed 's/.*cut \(.*\) stable.*/\1/' || echo "unknown")
 
           echo "target_tag=$TARGET_TAG" >> "$GITHUB_OUTPUT"
           echo "current_base=$CURRENT_BASE" >> "$GITHUB_OUTPUT"
 
-          if git merge-base --is-ancestor "$TARGET_TAG" security/audit-remediation 2>/dev/null; then
+          if git merge-base --is-ancestor "$TARGET_TAG" main 2>/dev/null; then
             echo "already_current=true" >> "$GITHUB_OUTPUT"
           else
             echo "already_current=false" >> "$GITHUB_OUTPUT"
@@ -80,7 +80,7 @@ jobs:
 
       - name: Push rebased branch
         if: steps.rebase.outputs.rebase_status == 'clean'
-        run: git push --force-with-lease origin security/audit-remediation
+        run: git push --force-with-lease origin main
 
       - name: Open issue on conflict
         if: steps.rebase.outputs.rebase_status == 'conflicts'
@@ -93,11 +93,11 @@ jobs:
             await github.rest.issues.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              title: `Rebase conflicts: security/audit-remediation onto ${target}`,
+              title: `Rebase conflicts: main onto ${target}`,
               body: [
                 `## Upstream Update Available`,
                 ``,
-                `Attempted to rebase \`security/audit-remediation\` from \`${base}\` onto \`${target}\` but hit conflicts.`,
+                `Attempted to rebase \`main\` from \`${base}\` onto \`${target}\` but hit conflicts.`,
                 ``,
                 `### Conflicting files`,
                 '```',
@@ -107,10 +107,10 @@ jobs:
                 `### Manual resolution`,
                 '```bash',
                 `git fetch upstream --tags`,
-                `git checkout security/audit-remediation`,
+                `git checkout main`,
                 `git rebase ${target}`,
                 `# resolve conflicts, then:`,
-                `git push --force-with-lease origin security/audit-remediation`,
+                `git push --force-with-lease origin main`,
                 '```',
               ].join('\n'),
               labels: ['upstream-sync', 'manual-intervention']
