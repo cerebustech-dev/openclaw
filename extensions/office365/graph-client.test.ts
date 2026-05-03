@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import type { PluginLogger } from "openclaw/plugin-sdk";
+import type { PluginLogger } from "openclaw/plugin-sdk/core";
 import type { Office365Config, Office365Credential } from "./src/types.js";
 
 // ── Mocks ──────────────────────────────────────────────────────────────────
