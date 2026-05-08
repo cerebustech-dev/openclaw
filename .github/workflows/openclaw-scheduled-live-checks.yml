@@ -1,8 +1,11 @@
 name: OpenClaw Scheduled Live And E2E Checks
 
 on:
-  schedule:
-    - cron: "23 4 * * *"
+  # Daily cron disabled on this fork: upstream's nightly live-test surface (45+ provider/OpenClaw
+  # secrets, real API spend, paid Blacksmith runners) is not configured here. Re-enable by
+  # uncommenting the schedule block AND populating all secrets referenced by the reusable workflow.
+  # schedule:
+  #   - cron: "23 4 * * *"
   workflow_dispatch:
 
 permissions:
